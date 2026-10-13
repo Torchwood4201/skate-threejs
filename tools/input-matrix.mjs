@@ -503,6 +503,317 @@ const popThen = (extra) => (i) => (i < 2 ? ["Space", ...extra] : [...extra]);
   );
 }
 
+// --- item 9: the flick and the key, same trick (M16) ---
+//
+// The flick pad throws through `SkateInputSource.flickTrick`, which is one
+// `press()` call — the same one a key runs. So a flicked kickflip and a
+// pressed F must read byte-identical out of `consume()`, at every rate, and a
+// flicked Space must read as the tap it is. A flick that produced a different
+// trick than the key would be a second game, so this is parity, not behaviour.
+console.log("--- item 9: the flick and the key, same trick ---\n");
+{
+  const fresh = (dt) => {
+    const listeners = {};
+    const saved = Object.getOwnPropertyDescriptor(globalThis, "window");
+    globalThis.window = {
+      addEventListener: (t, f) => void (listeners[t] ??= []).push(f),
+      removeEventListener: () => {},
+    };
+    const src = new SkateInputSource();
+    src.attach();
+    if (saved) Object.defineProperty(globalThis, "window", saved);
+    else delete globalThis.window;
+    src.consume(dt); // the loop was already running when the hands arrived
+    const fire = (type, code) =>
+      listeners[type]?.forEach((f) => f({ code, repeat: false, preventDefault() {} }));
+    return { src, fire };
+  };
+  const snap = (input) => ({
+    o: input.olliePressed,
+    k: input.kickflipPressed,
+    h: input.heelflipPressed,
+    s: input.shoveitPressed,
+    c: input.chargeHeld,
+  });
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+  for (const [code, flag] of [["KeyF", "k"], ["KeyG", "h"], ["KeyC", "s"]]) {
+    const got = RATES.map((fps) => {
+      const dt = 1 / fps;
+      const a = fresh(dt);
+      a.fire("keydown", code);
+      const viaKey = snap(a.src.consume(dt));
+      const b = fresh(dt);
+      b.src.flickTrick(code);
+      const viaFlick = snap(b.src.consume(dt));
+      return { viaKey, viaFlick };
+    });
+    check(
+      `flick ${code} reads exactly as the ${code} key`,
+      got.every((r) => same(r.viaKey, r.viaFlick) && r.viaFlick[flag] === true),
+      RATES.map((fps, i) => `${fps}fps key ${JSON.stringify(got[i].viaKey)} · flick ${JSON.stringify(got[i].viaFlick)}`).join(" · "),
+      "src/skate/input.ts — `flickTrick` throwing every code at the heelflip latch instead of `press(code)` — flick reads {h:true} against the key's latch at every rate",
+    );
+  }
+
+  // Space flicks as a tap: press and release inside one gesture, which is the
+  // instant ollie — wind-up never held, pop armed.
+  {
+    const got = RATES.map((fps) => {
+      const dt = 1 / fps;
+      const a = fresh(dt);
+      a.fire("keydown", "Space");
+      a.fire("keyup", "Space");
+      const viaTap = snap(a.src.consume(dt));
+      const b = fresh(dt);
+      b.src.flickTrick("Space");
+      const viaFlick = snap(b.src.consume(dt));
+      return { viaTap, viaFlick };
+    });
+    check(
+      "flick Space reads exactly as a Space tap",
+      got.every((r) => same(r.viaTap, r.viaFlick) && r.viaFlick.o === true && r.viaFlick.c === false),
+      RATES.map((fps, i) => `${fps}fps tap ${JSON.stringify(got[i].viaTap)} · flick ${JSON.stringify(got[i].viaFlick)}`).join(" · "),
+      "src/skate/input.ts — `flickTrick` throwing Space at the heelflip latch instead of a press+release tap — flick reads {h:true} against the tap's {o:true} at every rate",
+    );
+  }
+
+  // …and a flick nobody is reading is not input, like every other press.
+  {
+    const got = RATES.map((fps) => {
+      const dt = 1 / fps;
+      const { src } = fresh(dt);
+      // READ_TIMEOUT_MS is 330: sleep past it so the source is stale, however
+      // fast the machine is — the stamp predates the sleep by construction.
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 350);
+      src.flickTrick("KeyF");
+      return snap(src.consume(dt));
+    });
+    check(
+      "a stale flick queues nothing",
+      got.every((r) => r.k === false && r.h === false && r.s === false && r.o === false && r.c === false),
+      RATES.map((fps, i) => `${fps}fps ${JSON.stringify(got[i])}`).join(" · "),
+      "src/skate/input.ts — `flickTrick` without the `live()` gate — stale flick latches {h:true} at every rate, i.e. a title-screen swipe queues a trick",
+    );
+  }
+}
+
+// --- item 10: the pad and the keys, same ride (gamepad) ---
+//
+// The controller feeds the same source through the thumbs' own doors, so a
+// pad held full-right must read byte-identical to KeyD held, a pad A-hold to
+// a Space-hold, a right-stick throw to F, Start to the pause latch — at every
+// rate. Scripted pads (the feeder takes its provider as an argument), real
+// source, real `consume()`.
+console.log("--- item 10: the pad and the keys, same ride ---\n");
+{
+  const { SkateGamepad } = await import("../src/controllers/gamepad/skate-gamepad.ts");
+
+  const buttonsOf = (down) =>
+    Array.from({ length: 16 }, (_, i) => ({ pressed: down.includes(i) }));
+  /** A pad that plays `script(frame)` — `{ axes, down }` per frame, or null
+   *  for unplugged — feeding a fresh real source, polled like the loop does. */
+  const padHands = (dt, script) => {
+    const listeners = {};
+    const saved = Object.getOwnPropertyDescriptor(globalThis, "window");
+    globalThis.window = {
+      addEventListener: (t, f) => void (listeners[t] ??= []).push(f),
+      removeEventListener: () => {},
+    };
+    const src = new SkateInputSource();
+    src.attach();
+    if (saved) Object.defineProperty(globalThis, "window", saved);
+    else delete globalThis.window;
+    src.consume(dt);
+    let frame = 0;
+    const gp = new SkateGamepad(src, () => {
+      const s = script(frame);
+      return s ? [{ axes: s.axes, buttons: buttonsOf(s.down) }] : [];
+    });
+    return {
+      src,
+      step() {
+        gp.poll();
+        const input = src.consume(dt);
+        frame++;
+        return input;
+      },
+    };
+  };
+  const NEUTRAL = { axes: [0, 0, 0, 0], down: [] };
+  const j = (v) => JSON.stringify(v);
+
+  // Full-right stick vs held KeyD: the smoothing ramp is shared, so the whole
+  // series must match, not just the settle.
+  {
+    const got = RATES.map((fps) => {
+      const dt = 1 / fps;
+      const keys = hands(dt);
+      const a = [];
+      for (let i = 0; i < 30; i++) a.push(keys(["KeyD"]).steer);
+      const p = padHands(dt, () => ({ axes: [1, 0, 0, 0], down: [] }));
+      const b = [];
+      for (let i = 0; i < 30; i++) b.push(p.step().steer);
+      return { a, b };
+    });
+    check(
+      "pad full-right reads exactly as KeyD held",
+      got.every((r) => j(r.a) === j(r.b)),
+      RATES.map((fps, i) => `${fps}fps settle ${got[i].b[29].toFixed(4)}`).join(" · "),
+      "src/controllers/gamepad/skate-gamepad.ts — steer sign flipped — pad settles mirrored (-1) against the key's (+1) at every rate",
+    );
+  }
+
+  // Full-up stick vs held KeyW: pushing, not popping, for three seconds.
+  {
+    const got = RATES.map((fps) => {
+      const dt = 1 / fps;
+      const keys = hands(dt);
+      const p = padHands(dt, () => ({ axes: [0, -1, 0, 0], down: [] }));
+      const a = [];
+      const b = [];
+      for (let i = 0; i < Math.round(3 / dt); i++) {
+        a.push(keys(["KeyW"]));
+        b.push(p.step());
+      }
+      return { a, b };
+    });
+    check(
+      "pad full-up pushes exactly as KeyW held",
+      got.every((r) => r.a.every((k, i) => k.throttle === r.b[i].throttle && k.brake === r.b[i].brake)),
+      RATES.map((fps, i) => `${fps}fps throttle ${got[i].b.filter((x) => x.throttle).length}/${got[i].b.length} frames`).join(" · "),
+      "src/controllers/gamepad/skate-gamepad.ts — stick Y up/down swapped — full-up reads brake, throttle 0/90 at 30fps (0/180, 0/432)",
+    );
+  }
+
+  // Mid-travel stick: the hysteresis gate, not the deflection, is what is
+  // being checked. Raw 0.6 rescales to 0.55 (engages past 0.45), raw 0.5
+  // rescales to 0.43 (must NOT release — release is 0.30) — so an alternating
+  // 0.6/0.5 thumb holds the push steady. A bare single threshold chatters, and
+  // every chatter is a fresh push edge spending wind-ups.
+  {
+    const got = RATES.map((fps) => {
+      const dt = 1 / fps;
+      const p = padHands(dt, (i) => ({ axes: [0, i % 2 === 0 ? -0.6 : -0.5, 0, 0], down: [] }));
+      const series = [];
+      for (let i = 0; i < 12; i++) series.push(p.step().throttle);
+      return series;
+    });
+    check(
+      "pad mid-travel holds the push without chattering",
+      got.every((s) => s.every((t) => t === true)),
+      RATES.map((fps, i) => `${fps}fps throttle ${got[i].filter(Boolean).length}/12 frames`).join(" · "),
+      "src/controllers/gamepad/skate-gamepad.ts — gate without the release gap (single 0.45 threshold) — throttle alternates 6/12, i.e. a chatting push edge",
+    );
+  }
+
+  // A held vs Space held: the wind-up, then the pop on release.
+  {
+    const got = RATES.map((fps) => {
+      const dt = 1 / fps;
+      const keys = hands(dt);
+      const p = padHands(dt, (i) => (i < 10 ? { axes: [0, 0, 0, 0], down: [0] } : NEUTRAL));
+      const a = [];
+      const b = [];
+      for (let i = 0; i < 12; i++) {
+        a.push(keys(i < 10 ? ["Space"] : []));
+        b.push(p.step());
+      }
+      return { a, b };
+    });
+    check(
+      "pad A holds and pops exactly as Space",
+      got.every(
+        (r) =>
+          r.a.every((k, i) => k.chargeHeld === r.b[i].chargeHeld) &&
+          r.a[10].olliePressed === true &&
+          r.b[10].olliePressed === true,
+      ),
+      RATES.map((fps, i) => `${fps}fps wind-up ${got[i].b.filter((x) => x.chargeHeld).length} frames, pop ${got[i].b[10].olliePressed}`).join(" · "),
+      "src/controllers/gamepad/skate-gamepad.ts — A wired as an edge latch instead of a hold — chargeHeld false the whole hold, pop never armed",
+    );
+  }
+
+  // X / B / Y vs F / C / G: one latch each, handed out once.
+  for (const [pad, code, flag] of [[2, "KeyF", "kickflipPressed"], [1, "KeyC", "shoveitPressed"], [3, "KeyG", "heelflipPressed"]]) {
+    const got = RATES.map((fps) => {
+      const dt = 1 / fps;
+      const keys = hands(dt);
+      const viaKey = keys([code])[flag];
+      keys([]);
+      const p = padHands(dt, (i) => (i === 0 ? { axes: [0, 0, 0, 0], down: [pad] } : NEUTRAL));
+      const viaPad = p.step()[flag];
+      p.step();
+      return { viaKey, viaPad };
+    });
+    check(
+      `pad button ${pad} latches exactly as ${code}`,
+      got.every((r) => r.viaKey === true && r.viaPad === true),
+      RATES.map((fps, i) => `${fps}fps key ${got[i].viaKey} · pad ${got[i].viaPad}`).join(" · "),
+      `src/controllers/gamepad/skate-gamepad.ts — button ${pad} mapped to the wrong latch — pad reads false against the key's true at every rate`,
+    );
+  }
+
+  // Right-stick throw vs F: neutral, then hard right — one kickflip, handed
+  // out once, like the key.
+  {
+    const got = RATES.map((fps) => {
+      const dt = 1 / fps;
+      const p = padHands(
+        dt,
+        (i) => (i < 5 ? NEUTRAL : { axes: [0, 0, 0.8, 0], down: [] }),
+      );
+      const series = [];
+      for (let i = 0; i < 8; i++) series.push(p.step().kickflipPressed);
+      return series;
+    });
+    check(
+      "pad right-stick throw reads exactly as F",
+      got.every((s) => s.filter(Boolean).length === 1 && s[5] === true),
+      RATES.map((fps, i) => `${fps}fps ${got[i].filter(Boolean).length}x latched, first frame ${got[i].indexOf(true)} of 8`).join(" · "),
+      "src/controllers/gamepad/skate-gamepad.ts — flick without the re-arm gate — the held deflection latches every frame, i.e. a machine-gun kickflip",
+    );
+  }
+
+  // Start vs the pause latch.
+  {
+    const got = RATES.map((fps) => {
+      const dt = 1 / fps;
+      const p = padHands(dt, (i) => (i === 0 ? { axes: [0, 0, 0, 0], down: [9] } : NEUTRAL));
+      p.step();
+      return p.src.takePausePressed();
+    });
+    check(
+      "pad Start raises the pause latch",
+      got.every((v) => v === true),
+      RATES.map((fps, i) => `${fps}fps ${got[i]}`).join(" · "),
+      "src/controllers/gamepad/skate-gamepad.ts — Start not wired to pressPause — latch false at every rate",
+    );
+  }
+
+  // Unplugged mid-wind-up: he stands up, he does NOT pop. The keyboard's
+  // answer to a vanishing hand is alt-tab (`releaseAll`), so that is the
+  // comparison — charge gone, pop unarmed, both.
+  {
+    const got = RATES.map((fps) => {
+      const dt = 1 / fps;
+      const p = padHands(dt, (i) => (i < 5 ? { axes: [0, 0, 0, 0], down: [0] } : null));
+      const series = [];
+      for (let i = 0; i < 7; i++) series.push(p.step());
+      // The verdict is the FIRST frame after the plug is pulled (index 5): a
+      // pop armed there is the disconnect popping him; a later frame proves
+      // nothing, because `consume()` hands the latch out once and clears it.
+      return series[5];
+    });
+    check(
+      "unplugged mid-wind-up stands him up without popping",
+      got.every((o) => o.chargeHeld === false && o.olliePressed === false),
+      RATES.map((fps, i) => `${fps}fps charge ${got[i].chargeHeld} pop ${got[i].olliePressed}`).join(" · "),
+      "src/controllers/gamepad/skate-gamepad.ts — disconnect releasing Space instead of dropping it — olliePressed true, i.e. yanking the plug pops him",
+    );
+  }
+}
+
 void THREE;
 
 const failed = results.filter((r) => !r.pass);

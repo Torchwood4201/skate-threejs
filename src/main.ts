@@ -21,6 +21,7 @@ import type { TrickName } from "./skate/skate-model";
 import type { GrindKind, Stance, TrickId } from "./skate/contracts";
 import type { GrindLine } from "./world/surface";
 import { SkateInputSource } from "./skate/input";
+import { SkateGamepad } from "./controllers/gamepad/skate-gamepad";
 import { SkaterRig } from "./skate/skater-rig";
 import { SkaterAnim, type PostureTweak } from "./skate/skater-anim";
 import { createRagdoll } from "./skate/ragdoll";
@@ -477,6 +478,11 @@ async function boot(): Promise<void> {
 
   const input = new SkateInputSource();
   input.attach();
+  // The controller: polled once per frame in the loop, before `takeReset()`.
+  // No pad connected is one falsy array read per frame — the desktop path is
+  // otherwise exactly what ran before, and XMapper users (pad → key events)
+  // never touch this at all.
+  const gamepad = new SkateGamepad(input);
 
   // --- streamed content ------------------------------------------------------
   const gltf = createGltfLoader(renderer);
@@ -727,6 +733,10 @@ async function boot(): Promise<void> {
     // pop him on the way out. `null` on desktop, where this is one
     // optional-chain miss and nothing else.
     touch?.setPlaying(!value);
+    // …and the pad forgets its edges (not its holds — a press that started
+    // while paused was dropped by the staleness gate, so without this a button
+    // held through the resume would never edge again until it comes up).
+    if (!value) gamepad.resync();
     if (value && !atTitle) pause.open();
     else pause.close();
   };
@@ -1085,6 +1095,20 @@ async function boot(): Promise<void> {
     // written for.
     governor.frame(frameMs);
 
+    // THE PAD'S POLL — outside the pause gate on purpose. The controller feeds
+    // the same source the keys and the thumbs feed, and Start must wake the
+    // pause card as well as summon it: a poll that stopped while paused would
+    // make Start a one-way door. With no pad connected this is one falsy array
+    // read per frame.
+    gamepad.poll();
+    // Start on the pad is Escape's counterpart: the same intent through the
+    // same door, but NOT through the quest card — like reset, a pause asked
+    // for over the NPC's card is ignored, and at the title Escape is dead so
+    // Start is too. The latch lives at most one frame (polled here, every
+    // frame), so nothing queues.
+    const talking = dialogueOpen();
+    if (input.takePausePressed() && !atTitle && !talking) setPaused(!paused);
+
     if (!paused) {
       // THE QUEST CARD'S INPUT GATE. The source is still READ every frame —
       // `consume()` is what clears its edge-triggered latches, so a flip or a
@@ -1093,7 +1117,6 @@ async function boot(): Promise<void> {
       // instead of fighting the controls. Rendering, physics, animation, audio
       // and the camera all keep running: the world does not stop, only his
       // input does.
-      const talking = dialogueOpen();
       const resetAsked = input.takeReset();
       if (resetAsked && !talking) {
         // Hand the bones back before the model teleports — R mid-fall must not

@@ -73,6 +73,26 @@
 // islands and everything that is not one of them falls through to the canvas.
 // One drag convention in the game, and it is the one that was already verified.
 //
+// ── THE FLICK PAD (M16) ───────────────────────────────────────────────────
+// Skate 3 throws tricks off the right stick; a phone's right thumb is busy
+// holding OLLIE while it does, so the flick lives on its own island: a small
+// circle up the right edge, OUTSIDE the trick arc. The header's area budget
+// says a fifth widget does not fit inside the reach — this one does not try.
+// It sits at a hand-shift, which is the right price for a thrown trick, the
+// same price the never-built E slot was quoted.
+//
+// A swipe, not a button: fast flick in a direction, released within 600 ms,
+// travelling at least 24 px. Up pops (a Space tap through `flickTrick`),
+// right kicks, left heels, down shoves. A tap or a slow drag does NOTHING —
+// a pad that fired on touch-down would eat the thumb that missed FLIP. The
+// island is small (88 px) so the canvas drag-orbit keeps everything around
+// it: this is not a DragZone, it swallows only its own disc.
+// ── NO MOUSE FLICK (M16, deliberate) ──────────────────────────────────────
+// Desktop gets no gesture: under pointer lock EVERY mouse movement is the
+// camera (`skate-camera.ts`, `follow-camera.ts`), and a flick that also turns
+// the view is the twisted-diagonals bug wearing a new hat. F/G/C are the
+// desktop flick — the same `press()` the pad's `flickTrick` runs.
+//
 // ── SCREEN DIRECTION, TRACED RATHER THAN ASSUMED (AGENTS.md rule 17) ─────────
 // A mirrored axis is this lane's most common bug, so the chain is written out:
 //   1. `TouchJoystick.#move`: `#x = (clientX - centerX) / maxRadius`. A thumb
@@ -124,6 +144,7 @@
 import { TouchJoystick, VirtualButton } from "./touch-joystick";
 import { RotateOverlay } from "./rotate-overlay";
 import type {
+  FlickCode,
   TouchControlCode,
   TouchControls,
   TouchControlsOptions,
@@ -243,6 +264,17 @@ const RIDE_CLUSTER: readonly ButtonSpec[] = [
  */
 const PAUSE_SPEC = { hit: 46, cap: 34, font: 9, right: 10, top: 8 };
 const RESET_SPEC = { hit: 46, cap: 34, font: 9, right: 62, top: 8 };
+/**
+ * The flick island: 88 px of hit target up the right edge, above MANUAL
+ * (whose top sits 184 px off the bottom) and below RESET (whose bottom sits
+ * 54 px off the top — 336 px off the bottom on a 390 px frame). 196–284 px
+ * off the bottom clears both, and right 64–152 clears GRAB's top by 2 px.
+ */
+const FLICK_SPEC = { hit: 88, cap: 64, font: 11, right: 64, bottom: 196 };
+/** A swipe shorter than this is a tap that missed, not a throw. */
+const FLICK_MIN_PX = 24;
+/** A swipe longer than this is aiming the camera, not throwing a trick. */
+const FLICK_MAX_MS = 600;
 
 function clamp(value: number, low: number, high: number): number {
   return value < low ? low : value > high ? high : value;
@@ -290,6 +322,118 @@ const TAP_FLASH: Partial<CSSStyleDeclaration> = {
   borderColor: `rgba(${GOLD}, 0.9)`,
   color: `rgb(${GOLD})`,
 };
+
+/**
+ * The flick island. Returns a widget with the same two methods the layer's
+ * `widgets` list needs, plus `cancel()` for the silent release.
+ *
+ * Swipe up pops, right kicks, left heels, down shoves — clientX grows
+ * screen-right and clientY grows screen-DOWN, so "up" is negative dy and
+ * "right" is positive dx, with no other sign in the chain.
+ */
+function buildFlickPad(input: TouchControlsOptions["input"]): {
+  setVisible(visible: boolean): void;
+  dispose(): void;
+  cancel(): void;
+} {
+  const wrap = document.createElement("div");
+  const cap = document.createElement("div");
+  const label = document.createElement("span");
+  label.textContent = "FLICK";
+  cap.appendChild(label);
+  wrap.appendChild(cap);
+  Object.assign(wrap.style, {
+    position: "fixed",
+    zIndex: WIDGET_Z,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: `${FLICK_SPEC.hit}px`,
+    height: `${FLICK_SPEC.hit}px`,
+    right: inset(FLICK_SPEC.right, "right"),
+    bottom: inset(FLICK_SPEC.bottom, "bottom"),
+    touchAction: "none",
+    userSelect: "none",
+    webkitUserSelect: "none",
+  });
+  const baseCap = capStyle(FLICK_SPEC.cap, FLICK_SPEC.font, false);
+  Object.assign(cap.style, {
+    ...baseCap,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: "50%",
+  });
+
+  let tracking: { id: number; x0: number; y0: number; t0: number } | null = null;
+
+  const flash = (): void => {
+    Object.assign(cap.style, TAP_FLASH);
+    window.setTimeout(() => {
+      // Re-apply the resting cap wholesale — no snapshot to keep in sync.
+      Object.assign(cap.style, baseCap);
+    }, 140);
+  };
+
+  const throwFlick = (dx: number, dy: number, dt: number): void => {
+    if (dt > FLICK_MAX_MS) return;
+    if (Math.hypot(dx, dy) < FLICK_MIN_PX) return;
+    // Dominant axis wins; ties go horizontal, the axis with more tricks on it.
+    const code: FlickCode =
+      Math.abs(dx) >= Math.abs(dy)
+        ? dx > 0
+          ? "KeyF"
+          : "KeyG"
+        : dy > 0
+          ? "KeyC"
+          : "Space";
+    input.flickTrick(code);
+    flash();
+  };
+
+  const onDown = (e: PointerEvent): void => {
+    if (tracking) return;
+    tracking = { id: e.pointerId, x0: e.clientX, y0: e.clientY, t0: performance.now() };
+    try {
+      wrap.setPointerCapture(e.pointerId);
+    } catch {
+      /* capture unavailable — pointerleave parity below still ends it */
+    }
+    e.preventDefault();
+  };
+  const onUp = (e: PointerEvent): void => {
+    if (!tracking || tracking.id !== e.pointerId) return;
+    const { x0, y0, t0 } = tracking;
+    tracking = null;
+    throwFlick(e.clientX - x0, e.clientY - y0, performance.now() - t0);
+  };
+  const onCancel = (e: PointerEvent): void => {
+    if (!tracking || tracking.id !== e.pointerId) return;
+    tracking = null;
+  };
+
+  wrap.addEventListener("pointerdown", onDown);
+  wrap.addEventListener("pointerup", onUp);
+  wrap.addEventListener("pointercancel", onCancel);
+  document.body.appendChild(wrap);
+
+  return {
+    setVisible(visible: boolean): void {
+      wrap.style.display = visible ? "flex" : "none";
+    },
+    cancel(): void {
+      // A hide mid-swipe fires no pointerup — drop the vector, throw nothing.
+      tracking = null;
+    },
+    dispose(): void {
+      tracking = null;
+      wrap.removeEventListener("pointerdown", onDown);
+      wrap.removeEventListener("pointerup", onUp);
+      wrap.removeEventListener("pointercancel", onCancel);
+      wrap.remove();
+    },
+  };
+}
 
 /**
  * Build the layer. Only ever called from `createTouchControls`, and only on a
@@ -428,6 +572,11 @@ export function createSkateTouchLayer(options: TouchControlsOptions): TouchContr
     }),
   );
 
+  // --- the flick pad ------------------------------------------------------
+  // One island, one gesture, four tricks. Plain divs, not a VirtualButton:
+  // a button knows down and up, and a flick is the VECTOR between them.
+  const flick = buildFlickPad(options.input);
+
   // --- orientation ----------------------------------------------------------
   /**
    * PORTRAIT GENUINELY BREAKS THIS GAME, which is the test the kit sets for
@@ -480,12 +629,13 @@ export function createSkateTouchLayer(options: TouchControlsOptions): TouchContr
   function release(): void {
     stick.reset();
     for (const button of buttons) button.cancel();
+    flick.cancel();
     // …and the source's own memory of what was held, which is the same thing an
     // alt-tab does to a keyboard.
     input.releaseAll();
   }
 
-  const widgets: { setVisible(visible: boolean): void; dispose(): void }[] = [stick, ...buttons];
+  const widgets: { setVisible(visible: boolean): void; dispose(): void }[] = [stick, ...buttons, flick];
   // Off at construction. The boot builds this layer while it is still paused
   // behind the title screen, and `setPlaying` is driven from the one place that
   // already knows whether the game is running.

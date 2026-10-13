@@ -82,6 +82,13 @@ export type TouchControlCode =
   | "KeyR";
 
 /**
+ * What a flick throw may ask for: the three airborne flip latches plus the
+ * ollie tap. A subset of `TouchControlCode` on purpose — a flick is a thrown
+ * trick, never a held grab, a manual, a push or a reset.
+ */
+export type FlickCode = "Space" | "KeyF" | "KeyG" | "KeyC";
+
+/**
  * What the touch layer needs of the ride's input source, and nothing more.
  *
  * Declared as an interface rather than imported as `SkateInputSource` so the
@@ -112,6 +119,12 @@ export interface TouchInputSink {
    * the keys are read instead.
    */
   touchSteer(x: number): void;
+  /**
+   * A flick throw — swipe direction already resolved to a trick by the caller.
+   * Same latches as the key: F/G/C hand out once from `consume()`, Space pops
+   * as a tap. The flick pad is the only caller today.
+   */
+  flickTrick(code: FlickCode): void;
   /** Drop everything held, the way a lost window does. */
   releaseAll(): void;
 }

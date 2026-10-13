@@ -24,12 +24,47 @@ Key art: `cms2hv48901lw22lppfy2tr8c` (street, golden hour, UI-free).
   by:** R, instant reset, same block
 
 ## Build plan & status
-Now: **15. MOBILE CONTROLS (2026-09-26)** — working mode: **focused change**.
-The player asked: *"create a controls for mobile"*. Found already wired and
-re-verified this milestone rather than rebuilt: stick + OLLIE/FLIP/GRAB/MANUAL
-+ RESET + pause, phone-only chunk, `tsc` 0, `vite build` clean. Milestone 14's
+Now: **17. GAMEPAD (2026-10-13)** — working mode: **whole coordinated
+build** (plan: `.opencode/plans/1790385689482-crisp-harbor.md`; this insert
+is M17, the plan's old M17–M21 are now M18–M22). The player wants to play
+with a controller on the computer (XMapper in mind). Native pad support
+lands, so no mapper is needed — and XMapper pad→keys keeps working untouched,
+since it arrives as key events and never meets the new code. Milestone 16's
 table is kept below; milestone 12's rows still marked ⏳/❌/⚠️ have NOT been
 absorbed here and are still owed.
+
+### Milestone 17 — GAMEPAD (2026-10-13) — landed
+
+| # | change | file |
+| - | ------ | ---- |
+| 1 | feeder: left stick carves (same ramp as keys) + push/brake through the 0.45/0.30 gate; right stick throws flicks with re-arm; A/X/Y/B + triggers + d-pad; Start → pause latch, Back → reset; disconnect drops pad-held codes silently | `controllers/gamepad/skate-gamepad.ts` (new) |
+| 2 | `pressPause`/`takePausePressed` latch (+ cleared in `releaseAll`); `dropControl` silent per-code drop for vanishing hands | `skate/input.ts` |
+| 3 | poll every frame before `takeReset()`/`consume()` (runs while paused so Start wakes the card; gated on title + quest card); edge resync on unpause | `main.ts` |
+| 4 | item 10: 10 parity checks vs keys at 30/60/144 fps (steer series, push, A hold+pop, 3 latches, stick throw, Start, unplug-no-pop, mid-travel hysteresis) | `tools/input-matrix.mjs` |
+
+Layout: left stick move · A ollie (hold+release) · X/Y/B kick/heel/shove · right stick flicks · RT grab · LT manual · LB slide · RB nose manual · d-pad mirrors · Start pause · Back reset. The right stick stays the trick stick, so the mouse keeps the camera with nothing to fight.
+
+Verified: `tsc` 0 · `vite build` clean · item 10, 10/10 at all rates, every proof watched failing (three mutation runs; the runs also caught two weak checks — stale-style late read on the unplug verdict, and an assertion that passed while a stale flick queued a heelflip — both fixed to assert the exact frame). Full file 31/32; the one red (`slide key: the bar he declined is still steel`, handrail-3@8m/s 30fps by 0.11 m) A/B'd byte-identical on the pristine tree — pre-existing, not this milestone's.
+
+### Milestone 16 — FLICK + BOARD FEEL (2026-10-13) — landed
+
+Skate 3 throws tricks off the right stick. Here a flick is an intent, not a
+device: `SkateInputSource.flickTrick()` runs the SAME `press()` a key runs,
+so flick and key read byte-identical out of `consume()` — same tie-breaks,
+same staleness gate, same latches. Up pops (Space tap), right kicks, left
+heels, down shoves. Phone gets a small FLICK swipe island up the right edge
+(fast swipe only; taps and slow drags do nothing, so a missed FLIP never
+fires). Desktop gets no mouse gesture — under pointer lock every mouse move
+is the camera, and a flick that also turns the view is the twisted-diagonals
+bug again; F/G/C are the desktop flick through the same path.
+
+Verified: `tsc` 0 · `vite build` clean, touch chunk still split ·
+`tools/input-matrix.mjs` item 9, 5/5 at 30/60/144 fps, all watched failing
+(the mutation run also caught the stale check asserting too little — it
+passed while a stale flick queued a heelflip; now asserts the whole frame
+empty). Full file 21/22; the one red (`slide key: the bar he declined is
+still steel`, handrail-3@8m/s 30fps by 0.11 m) A/B'd byte-identical on the
+pristine tree — pre-existing, not this milestone's.
 
 ### Milestone 15 — MOBILE CONTROLS (2026-09-26)
 

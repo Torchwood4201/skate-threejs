@@ -75,7 +75,7 @@ import type { SkateInput } from "./skate-model";
 // LAYER, so the union lives with it rather than here; this file's own vocabulary
 // is `HANDLED` at the bottom, which is the longer list. Type-only, so it costs
 // the bundle nothing and the harnesses' type-stripping erases it.
-import type { TouchControlCode } from "../ui/touch-controls";
+import type { FlickCode, TouchControlCode } from "../ui/touch-controls";
 
 const STEER_SMOOTH = 9; // how fast the stick swings to the pressed direction
 /**
@@ -100,6 +100,12 @@ export class SkateInputSource {
   private heelflipPressed = false;
   private shoveitPressed = false;
   private resetPressed = false;
+  /**
+   * The controller's Start button. A latch like reset, not a key: pause
+   * belongs to the boot (Escape), so the loop polls this and raises the same
+   * intent through the same door.
+   */
+  private pausePressed = false;
   private steerSmoothed = 0;
   /**
    * A push during the wind-up calls the jump off. You cannot kick and pop off
@@ -239,12 +245,51 @@ export class SkateInputSource {
     return r;
   }
 
+  /**
+   * The pad's Start button went down. Deliberately NOT gated on `live()`:
+   * pausing stops the loop's `consume()`, so a gate here would make Start
+   * unable to wake the pause card — the one thing it is for. Staleness is
+   * handled at the call site instead: the boot polls `takePausePressed()`
+   * every frame and ignores it at the title, so a latch lives at most one
+   * frame and can never queue.
+   */
+  pressPause(): void {
+    this.pausePressed = true;
+  }
+
+  /** True once per Start press — the loop turns it into `setPaused(!paused)`. */
+  takePausePressed(): boolean {
+    const p = this.pausePressed;
+    this.pausePressed = false;
+    return p;
+  }
+
   // --- the touch layer's entry points ---------------------------------------
   //
   // These three are the whole of what `src/controllers/touch/skate-touch-layer.ts`
   // may do to the ride, and the shape is the one this file's header asked for
   // before there was a phone build: the widgets own themselves and FEED this
   // source. Not one of them is a second copy of a rule.
+
+  /**
+   * A flick throw — the Skate-3 right-stick gesture, re-implemented as an
+   * intent rather than a device: the flick pad, and any future flick surface,
+   * calls this instead of pressing keys itself.
+   *
+   * It runs the SAME `press`/`release` below a key runs, so every argument
+   * settled in this file applies unchanged: the push/pop tie-break, the
+   * staleness gate, the edge latches `consume()` hands out once. A flick that
+   * produced a different trick than the key would be a second game wearing the
+   * first one's clothes — this one line is what stops that.
+   *
+   * `Space` flicks as a tap: press and release in the same gesture, which is
+   * exactly the instant ollie a tap is. F/G/C latch until `consume()`.
+   */
+  flickTrick(code: FlickCode): void {
+    if (!this.live()) return;
+    this.press(code);
+    if (code === "Space") this.release(code);
+  }
 
   /**
    * Press or release the control the keyboard reaches with `code`.
@@ -266,6 +311,17 @@ export class SkateInputSource {
     } else {
       this.release(code);
     }
+  }
+
+  /**
+   * Silently drop one held control — a yanked plug, not a lifted finger.
+   * Letting go of Space through `release()` would POP him (press without a
+   * witnessed release is a tap), and an unplugged pad mid-wind-up must stand
+   * him up, not launch him. The touch layer's `cancel()` is the same idea for
+   * buttons; this is its per-code form for hands that vanish whole.
+   */
+  dropControl(code: TouchControlCode): void {
+    this.held.delete(code);
   }
 
   /**
@@ -294,6 +350,7 @@ export class SkateInputSource {
     this.throttleWas = false;
     this.windingWas = false;
     this.pushLocked = false;
+    this.pausePressed = false;
     this.touchStick = 0;
   }
 
