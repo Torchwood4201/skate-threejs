@@ -16,5 +16,5 @@ PS2-era street skating in Three.js — a fully generated spot, built with the Ge
 - 🐛 [Report an issue](https://github.com/Torchwood4201/skate-threejs/issues).
 - 👤 [Explore the creator's projects](https://omgithub.com/Torchwood4201).
 - 🌍 [Create with OMGithub](https://omgithub.com).
-- 🧬 [Explore the remix source](https://github.com/bloxpicto4-blip/skate-threejs/tree/24670fa7aa70f8a81623fd73c7546c5c89ac3653).
+- 🧬 [Explore the remix source](https://github.com/Torchwood4201/skate-threejs/tree/df7953ba64439010c593c542b95f5944ce1154f4).
 <!-- omgithub:readme:end -->
