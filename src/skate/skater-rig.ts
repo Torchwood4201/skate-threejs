@@ -400,8 +400,12 @@ export class SkaterRig {
     // a pivot landing mid-kickflip: the deck jumped 135° in one frame.
     const spun = skate.flip < 1 ? skate.flip * Math.PI * 2 * skate.flipSign : 0;
     if (skate.flip >= 1) this.flipHand = skate.stance === "switch" ? -1 : 1;
-    this.boardFlip.rotation.z = skate.flipAxis === "roll" ? -spun * this.flipHand : 0;
-    this.boardFlip.rotation.y = skate.flipAxis === "yaw" ? spun : 0;
+    // A tre flip is both at once — the model's one `flip` clock drives both
+    // axes, and the landing's `flip >= 1` test needs no second opinion.
+    const rolling = skate.flipAxis === "roll" || skate.flipAxis === "both";
+    const yawing = skate.flipAxis === "yaw" || skate.flipAxis === "both";
+    this.boardFlip.rotation.z = rolling ? -spun * this.flipHand : 0;
+    this.boardFlip.rotation.y = yawing ? spun : 0;
 
     // The deck across the line it is grinding. `root` already points down the
     // direction of travel, so this node carries only the difference — 0 for a

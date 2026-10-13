@@ -598,14 +598,16 @@ console.log("--- item 9: the flick and the key, same trick ---\n");
   }
 }
 
-// --- item 10: the pad and the keys, same ride (gamepad) ---
+// --- item 10: the pad and the PDF, same ride (gamepad) ---
 //
-// The controller feeds the same source through the thumbs' own doors, so a
-// pad held full-right must read byte-identical to KeyD held, a pad A-hold to
-// a Space-hold, a right-stick throw to F, Start to the pause latch — at every
-// rate. Scripted pads (the feeder takes its provider as an argument), real
-// source, real `consume()`.
-console.log("--- item 10: the pad and the keys, same ride ---\n");
+// The controller runs the PDF's Flick-it layout and nothing else, so a pad
+// input must read byte-identical to the keyboard key that reaches the same
+// verb: A holds like W, B brakes like S, Y winds and pops like Space, LB/RB
+// hold like E/Shift, LT/RT grab like X, the right stick crouches and flicks
+// through `flickTrick` like the touch pad, Start raises the pause latch, X
+// and R3 tap reset like R — at every rate. Scripted pads (the feeder takes
+// its provider as an argument), real source, real `consume()`.
+console.log("--- item 10: the pad and the PDF, same ride ---\n");
 {
   const { SkateGamepad } = await import("../src/controllers/gamepad/skate-gamepad.ts");
 
@@ -664,12 +666,30 @@ console.log("--- item 10: the pad and the keys, same ride ---\n");
     );
   }
 
-  // Full-up stick vs held KeyW: pushing, not popping, for three seconds.
+  // Left-stick Y is NOT a throttle any more (push is A, brake is B): full-up
+  // on the stick must push nothing and brake nothing.
+  {
+    const got = RATES.map((fps) => {
+      const dt = 1 / fps;
+      const p = padHands(dt, () => ({ axes: [0, -1, 0, 0], down: [] }));
+      const series = [];
+      for (let i = 0; i < 30; i++) series.push(p.step());
+      return series;
+    });
+    check(
+      "pad left-stick Y drives nothing",
+      got.every((s) => s.every((x) => x.throttle === false && x.brake === false)),
+      RATES.map((fps, i) => `${fps}fps throttle ${got[i].filter((x) => x.throttle).length}/30 brake ${got[i].filter((x) => x.brake).length}/30`).join(" · "),
+      "src/controllers/gamepad/skate-gamepad.ts — left Y still gated to KeyW/KeyS — full-up pushes 30/30, i.e. the PDF's A-push has a second throttle",
+    );
+  }
+
+  // A held vs W held: pushing, not popping, for three seconds.
   {
     const got = RATES.map((fps) => {
       const dt = 1 / fps;
       const keys = hands(dt);
-      const p = padHands(dt, () => ({ axes: [0, -1, 0, 0], down: [] }));
+      const p = padHands(dt, () => ({ axes: [0, 0, 0, 0], down: [0] }));
       const a = [];
       const b = [];
       for (let i = 0; i < Math.round(3 / dt); i++) {
@@ -679,40 +699,41 @@ console.log("--- item 10: the pad and the keys, same ride ---\n");
       return { a, b };
     });
     check(
-      "pad full-up pushes exactly as KeyW held",
+      "pad A pushes exactly as KeyW held",
       got.every((r) => r.a.every((k, i) => k.throttle === r.b[i].throttle && k.brake === r.b[i].brake)),
       RATES.map((fps, i) => `${fps}fps throttle ${got[i].b.filter((x) => x.throttle).length}/${got[i].b.length} frames`).join(" · "),
-      "src/controllers/gamepad/skate-gamepad.ts — stick Y up/down swapped — full-up reads brake, throttle 0/90 at 30fps (0/180, 0/432)",
+      "src/controllers/gamepad/skate-gamepad.ts — A not held as KeyW — throttle 0/90 at 30fps (0/180, 0/432)",
     );
   }
 
-  // Mid-travel stick: the hysteresis gate, not the deflection, is what is
-  // being checked. Raw 0.6 rescales to 0.55 (engages past 0.45), raw 0.5
-  // rescales to 0.43 (must NOT release — release is 0.30) — so an alternating
-  // 0.6/0.5 thumb holds the push steady. A bare single threshold chatters, and
-  // every chatter is a fresh push edge spending wind-ups.
-  {
-    const got = RATES.map((fps) => {
-      const dt = 1 / fps;
-      const p = padHands(dt, (i) => ({ axes: [0, i % 2 === 0 ? -0.6 : -0.5, 0, 0], down: [] }));
-      const series = [];
-      for (let i = 0; i < 12; i++) series.push(p.step().throttle);
-      return series;
-    });
-    check(
-      "pad mid-travel holds the push without chattering",
-      got.every((s) => s.every((t) => t === true)),
-      RATES.map((fps, i) => `${fps}fps throttle ${got[i].filter(Boolean).length}/12 frames`).join(" · "),
-      "src/controllers/gamepad/skate-gamepad.ts — gate without the release gap (single 0.45 threshold) — throttle alternates 6/12, i.e. a chatting push edge",
-    );
-  }
-
-  // A held vs Space held: the wind-up, then the pop on release.
+  // B held vs S held: the brake.
   {
     const got = RATES.map((fps) => {
       const dt = 1 / fps;
       const keys = hands(dt);
-      const p = padHands(dt, (i) => (i < 10 ? { axes: [0, 0, 0, 0], down: [0] } : NEUTRAL));
+      const p = padHands(dt, () => ({ axes: [0, 0, 0, 0], down: [1] }));
+      const a = [];
+      const b = [];
+      for (let i = 0; i < 10; i++) {
+        a.push(keys(["KeyS"]));
+        b.push(p.step());
+      }
+      return { a, b };
+    });
+    check(
+      "pad B brakes exactly as KeyS held",
+      got.every((r) => r.a.every((k, i) => k.brake === r.b[i].brake)),
+      RATES.map((fps, i) => `${fps}fps brake ${got[i].b.filter((x) => x.brake).length}/10`).join(" · "),
+      "src/controllers/gamepad/skate-gamepad.ts — B not held as KeyS — brake 0/10 at every rate",
+    );
+  }
+
+  // Y held vs Space held: the wind-up, then the pop on release.
+  {
+    const got = RATES.map((fps) => {
+      const dt = 1 / fps;
+      const keys = hands(dt);
+      const p = padHands(dt, (i) => (i < 10 ? { axes: [0, 0, 0, 0], down: [3] } : NEUTRAL));
       const a = [];
       const b = [];
       for (let i = 0; i < 12; i++) {
@@ -722,7 +743,7 @@ console.log("--- item 10: the pad and the keys, same ride ---\n");
       return { a, b };
     });
     check(
-      "pad A holds and pops exactly as Space",
+      "pad Y winds and pops exactly as Space",
       got.every(
         (r) =>
           r.a.every((k, i) => k.chargeHeld === r.b[i].chargeHeld) &&
@@ -730,48 +751,119 @@ console.log("--- item 10: the pad and the keys, same ride ---\n");
           r.b[10].olliePressed === true,
       ),
       RATES.map((fps, i) => `${fps}fps wind-up ${got[i].b.filter((x) => x.chargeHeld).length} frames, pop ${got[i].b[10].olliePressed}`).join(" · "),
-      "src/controllers/gamepad/skate-gamepad.ts — A wired as an edge latch instead of a hold — chargeHeld false the whole hold, pop never armed",
+      "src/controllers/gamepad/skate-gamepad.ts — Y wired as an edge latch instead of a hold — chargeHeld false the whole hold, pop never armed",
     );
   }
 
-  // X / B / Y vs F / C / G: one latch each, handed out once.
-  for (const [pad, code, flag] of [[2, "KeyF", "kickflipPressed"], [1, "KeyC", "shoveitPressed"], [3, "KeyG", "heelflipPressed"]]) {
+  // LB/RB/LT/RT holds vs E/Shift/X holds: one level each.
+  for (const [pad, code, flag] of [[4, "KeyE", "slideHeld"], [5, "ShiftLeft", "manualHeld"], [6, "KeyX", "grabHeld"], [7, "KeyX", "grabHeld"]]) {
     const got = RATES.map((fps) => {
       const dt = 1 / fps;
       const keys = hands(dt);
       const viaKey = keys([code])[flag];
-      keys([]);
-      const p = padHands(dt, (i) => (i === 0 ? { axes: [0, 0, 0, 0], down: [pad] } : NEUTRAL));
+      const p = padHands(dt, () => ({ axes: [0, 0, 0, 0], down: [pad] }));
       const viaPad = p.step()[flag];
-      p.step();
       return { viaKey, viaPad };
     });
     check(
-      `pad button ${pad} latches exactly as ${code}`,
+      `pad button ${pad} holds exactly as ${code}`,
       got.every((r) => r.viaKey === true && r.viaPad === true),
       RATES.map((fps, i) => `${fps}fps key ${got[i].viaKey} · pad ${got[i].viaPad}`).join(" · "),
-      `src/controllers/gamepad/skate-gamepad.ts — button ${pad} mapped to the wrong latch — pad reads false against the key's true at every rate`,
+      `src/controllers/gamepad/skate-gamepad.ts — button ${pad} mapped to the wrong hold — pad reads false against the key's true at every rate`,
     );
   }
 
-  // Right-stick throw vs F: neutral, then hard right — one kickflip, handed
-  // out once, like the key.
+  // X tap vs R tap: step off / get back on is the reset latch.
   {
+    const got = RATES.map((fps) => {
+      const dt = 1 / fps;
+      const p = padHands(dt, (i) => (i === 0 ? { axes: [0, 0, 0, 0], down: [2] } : NEUTRAL));
+      p.step();
+      const latched = p.src.takeReset();
+      p.step();
+      const once = p.src.takeReset();
+      return { latched, once };
+    });
+    check(
+      "pad X taps reset exactly as R",
+      got.every((r) => r.latched === true && r.once === false),
+      RATES.map((fps, i) => `${fps}fps latch ${got[i].latched}, re-read ${got[i].once}`).join(" · "),
+      "src/controllers/gamepad/skate-gamepad.ts — X not tapping KeyR — latch false at every rate",
+    );
+  }
+
+  // Right stick down-hold vs Space hold: the crouch; release pops.
+  {
+    const got = RATES.map((fps) => {
+      const dt = 1 / fps;
+      const p = padHands(dt, (i) => (i < 10 ? { axes: [0, 0, 0, 0.8], down: [] } : NEUTRAL));
+      const series = [];
+      for (let i = 0; i < 12; i++) series.push(p.step());
+      return series;
+    });
+    check(
+      "pad stick-down crouches and pops exactly as Space",
+      got.every(
+        (s) =>
+          s.slice(0, 10).every((x) => x.chargeHeld === true) &&
+          s[10].olliePressed === true,
+      ),
+      RATES.map((fps, i) => `${fps}fps wind-up ${got[i].filter((x) => x.chargeHeld).length} frames, pop ${got[i][10].olliePressed}`).join(" · "),
+      "src/controllers/gamepad/skate-gamepad.ts — stick-down not holding Space — chargeHeld false through the hold at every rate",
+    );
+  }
+
+  // Right stick flicks: up ollies, up-left kicks, up-right heels, down-left
+  // and down-right shove — the PDF's diagonals, regular stance.
+  const flicks = [
+    ["up", [0, -0.9], "olliePressed"],
+    ["up-left", [-0.7, -0.7], "kickflipPressed"],
+    ["up-right", [0.7, -0.7], "heelflipPressed"],
+    ["left", [-0.9, 0], "kickflipPressed"],
+    ["right", [0.9, 0], "heelflipPressed"],
+    ["down-left", [-0.6, 0.6], "shoveitPressed"],
+    ["down-right", [0.6, 0.6], "shoveitPressed"],
+  ];
+  for (const [name, stick, flag] of flicks) {
     const got = RATES.map((fps) => {
       const dt = 1 / fps;
       const p = padHands(
         dt,
-        (i) => (i < 5 ? NEUTRAL : { axes: [0, 0, 0.8, 0], down: [] }),
+        (i) => (i < 3 ? NEUTRAL : i === 3 ? { axes: [0, 0, stick[0], stick[1]], down: [] } : NEUTRAL),
       );
       const series = [];
-      for (let i = 0; i < 8; i++) series.push(p.step().kickflipPressed);
+      for (let i = 0; i < 6; i++) series.push(p.step()[flag]);
       return series;
     });
     check(
-      "pad right-stick throw reads exactly as F",
-      got.every((s) => s.filter(Boolean).length === 1 && s[5] === true),
-      RATES.map((fps, i) => `${fps}fps ${got[i].filter(Boolean).length}x latched, first frame ${got[i].indexOf(true)} of 8`).join(" · "),
-      "src/controllers/gamepad/skate-gamepad.ts — flick without the re-arm gate — the held deflection latches every frame, i.e. a machine-gun kickflip",
+      `pad flick ${name} reads exactly as its trick`,
+      got.every((s) => s.filter(Boolean).length === 1 && s[3] === true),
+      RATES.map((fps, i) => `${fps}fps ${got[i].filter(Boolean).length}x latched, frame ${got[i].indexOf(true)} of 6`).join(" · "),
+      `src/controllers/gamepad/skate-gamepad.ts — ${name} sector misclassified — latch missing or on the wrong frame at every rate`,
+    );
+  }
+
+  // Pull down, THEN flick up-left in one motion: the crouch spends into the
+  // flip — kickflip latched, and no plain pop on the way out.
+  {
+    const got = RATES.map((fps) => {
+      const dt = 1 / fps;
+      const p = padHands(dt, (i) =>
+        i < 3 ? NEUTRAL : i < 6 ? { axes: [0, 0, 0, 0.8], down: [] } : i === 6 ? { axes: [0, 0, -0.7, -0.7], down: [] } : NEUTRAL,
+      );
+      const series = [];
+      for (let i = 0; i < 9; i++) series.push(p.step());
+      return series;
+    });
+    check(
+      "pad down-then-up-left spends the crouch into a kickflip",
+      got.every(
+        (s) =>
+          s[6].kickflipPressed === true &&
+          s.every((x) => x.olliePressed === false),
+      ),
+      RATES.map((fps, i) => `${fps}fps kick ${got[i][6].kickflipPressed}, pops ${got[i].filter((x) => x.olliePressed).length}`).join(" · "),
+      "src/controllers/gamepad/skate-gamepad.ts — no intra-crouch redirect — the up-left never fires and the release pops a plain ollie",
     );
   }
 
@@ -791,18 +883,14 @@ console.log("--- item 10: the pad and the keys, same ride ---\n");
     );
   }
 
-  // Unplugged mid-wind-up: he stands up, he does NOT pop. The keyboard's
-  // answer to a vanishing hand is alt-tab (`releaseAll`), so that is the
-  // comparison — charge gone, pop unarmed, both.
+  // Unplugged mid-wind-up: he stands up, he does NOT pop.
   {
     const got = RATES.map((fps) => {
       const dt = 1 / fps;
-      const p = padHands(dt, (i) => (i < 5 ? { axes: [0, 0, 0, 0], down: [0] } : null));
+      const p = padHands(dt, (i) => (i < 5 ? { axes: [0, 0, 0, 0], down: [3] } : null));
       const series = [];
       for (let i = 0; i < 7; i++) series.push(p.step());
-      // The verdict is the FIRST frame after the plug is pulled (index 5): a
-      // pop armed there is the disconnect popping him; a later frame proves
-      // nothing, because `consume()` hands the latch out once and clears it.
+      // The verdict is the FIRST frame after the plug is pulled (index 5).
       return series[5];
     });
     check(
@@ -810,6 +898,295 @@ console.log("--- item 10: the pad and the keys, same ride ---\n");
       got.every((o) => o.chargeHeld === false && o.olliePressed === false),
       RATES.map((fps, i) => `${fps}fps charge ${got[i].chargeHeld} pop ${got[i].olliePressed}`).join(" · "),
       "src/controllers/gamepad/skate-gamepad.ts — disconnect releasing Space instead of dropping it — olliePressed true, i.e. yanking the plug pops him",
+    );
+  }
+}
+
+// --- item 11: the mash-up's arcade row -------------------------------------
+//
+// J/L/I/K throw the same latches F/G/C always did, U/O/Y/H/N hold a grab AND
+// name it, M manuals (Shift+M noses), G holds the grind key, V latches a
+// revert, B brakes, and Space still winds — with the wind-up's own length now
+// buying air past a deadband. Driven through the real source, the real book,
+// the real Grinder and the real model, at 30/60/144 fps throughout.
+console.log("--- item 11: the mash-up's arcade row ---\n");
+{
+  const { TrickBook } = await import("../src/skate/tricks.ts");
+  const { Grinder } = await import("../src/skate/grind.ts");
+
+  // J/L/I/K land on exactly the latches F/G/C always set — one press, one
+  // hand-out, then clear. Same flags, same edges, new keys.
+  for (const [code, flag] of [["KeyJ", "kickflipPressed"], ["KeyL", "heelflipPressed"], ["KeyK", "shoveitPressed"], ["KeyI", "treflipPressed"]]) {
+    const got = RATES.map((fps) => {
+      const dt = 1 / fps;
+      const keys = hands(dt);
+      // Read the SAME consume the press went into: the latch is handed out
+      // once, so the frame after is already clear. (Reading one frame late
+      // was the first version of this check, and it proved nothing.)
+      const first = keys([code])[flag];
+      const second = keys([])[flag];
+      return { first, second };
+    });
+    check(
+      `${code} latches exactly once, like the flick keys`,
+      got.every((r) => r.first === true && r.second === false),
+      RATES.map((fps, i) => `${fps}fps first ${got[i].first}, re-read ${got[i].second}`).join(" · "),
+      `src/skate/input.ts — press() missing the ${code} latch — first read false at every rate`,
+    );
+  }
+
+  // …and the book resolves them: treflip is a real trick id, not a rename.
+  {
+    const book = new TrickBook();
+    const ctx = { grounded: false, airborne: true, grinding: false, stance: "regular", speed: 8, fakie: false, flipping: false };
+    check(
+      "the book resolves a treflip off the I latch",
+      book.resolve({ treflipPressed: true }, ctx) === "treflip",
+      `resolve → ${book.resolve({ treflipPressed: true }, ctx)}`,
+      "src/skate/tricks.ts — resolve() with no treflip branch — null, i.e. I does nothing airborne",
+    );
+  }
+
+  // U/O/Y/H/N name their grab outright; X still reads the stick. Driven
+  // through the REAL source (press → consume), because the wiring at risk is
+  // the key-to-flavour map in `press()`, not the book's `grabKey` reader —
+  // handing the book a flavour directly would prove nothing about the keys.
+  for (const [code, flavour] of [["KeyU", "Indy"], ["KeyO", "Melon"], ["KeyY", "Method"], ["KeyH", "Nosegrab"], ["KeyN", "Tailgrab"]]) {
+    const got = RATES.map((fps) => {
+      const dt = 1 / fps;
+      const keys = hands(dt);
+      const input = keys([code]);
+      keys([]);
+      return { held: input.grabHeld, key: input.grabKey };
+    });
+    check(
+      `${code} holds a grab named ${flavour}`,
+      got.every((r) => r.held === true && r.key === flavour),
+      RATES.map((fps, i) => `${fps}fps held:${got[i].held} flavour:${got[i].key}`).join(" · "),
+      `src/skate/input.ts — press() mapping ${code} to the wrong flavour — grabKey reads Indy, not ${flavour}`,
+    );
+    const book = new TrickBook();
+    const ctx = { grounded: false, airborne: true, grinding: false, stance: "regular", speed: 8, fakie: false, flipping: false };
+    const holding = book.held({ grabHeld: true, grabKey: flavour, steer: 0 }, ctx);
+    check(
+      `a ${flavour} grabKey banks a ${flavour}`,
+      holding === "grab" && book.grabName === flavour,
+      `held → ${holding}, flavour ${book.grabName}`,
+      `src/skate/tricks.ts — held() ignoring grabKey — flavour falls back to stick (Indy), not ${flavour}`,
+    );
+  }
+
+  // M manuals; Shift+M (and Q) ride the nose; Shift alone still manuals.
+  {
+    const got = RATES.map((fps) => {
+      const dt = 1 / fps;
+      const keys = hands(dt);
+      const m = keys(["KeyM"]);
+      const shiftM = keys(["ShiftLeft", "KeyM"]);
+      const shift = keys(["ShiftLeft"]);
+      keys([]);
+      return { m: m.manualHeld, nose: shiftM.noseManualHeld, shift: shift.manualHeld };
+    });
+    check(
+      "M manuals, Shift+M noses, Shift alone still manuals",
+      got.every((r) => r.m === true && r.nose === true && r.shift === true),
+      RATES.map((fps, i) => `${fps}fps M:${got[i].m} Shift+M nose:${got[i].nose} Shift:${got[i].shift}`).join(" · "),
+      "src/skate/input.ts — consume() with no M row — manual false everywhere M is held",
+    );
+  }
+
+  // G holds the grind key; V latches a revert; B brakes like S.
+  {
+    const got = RATES.map((fps) => {
+      const dt = 1 / fps;
+      const keys = hands(dt);
+      const g = keys(["KeyG"]);
+      const v = keys(["KeyV"])[`revertPressed`];
+      const vAgain = keys([]).revertPressed;
+      const b = keys(["KeyB"]);
+      keys([]);
+      return { g: g.grindHeld, v, vAgain, b: b.brake };
+    });
+    check(
+      "G holds grind, V latches revert once, B brakes",
+      got.every((r) => r.g === true && r.v === true && r.vAgain === false && r.b === true),
+      RATES.map((fps, i) => `${fps}fps grind:${got[i].g} revert:${got[i].v}/${got[i].vAgain} brake:${got[i].b}`).join(" · "),
+      "src/skate/input.ts — V with no latch — revert false on first read at every rate",
+    );
+  }
+
+  // G commits: 1.2 m/s is under the rail's own minimum, and only the key
+  // gets him on. Asked of the real Grinder on a synthetic straight rail.
+  {
+    const rail = {
+      id: "matrix-rail",
+      a: new THREE.Vector3(-5, 1, 0),
+      b: new THREE.Vector3(5, 1, 0),
+      kind: "rail",
+      surface: "metal",
+      radius: 0.3,
+    };
+    const attempt = (grindWanted) => {
+      const g = new Grinder();
+      return g.catch(
+        {
+          x: 0, y: 1.2, z: 0.2, yPrev: 1.2, heading: Math.PI / 2, course: Math.PI / 2,
+          speed: 1.2, stance: "regular", grindWanted,
+        },
+        [rail],
+      );
+    };
+    const bare = attempt(false);
+    const held = attempt(true);
+    check(
+      "G-held, a 1.2 m/s roll locks on; unheld it slides past",
+      bare === null && held !== null,
+      `unheld ${bare === null ? "declined" : "caught"} · held ${held === null ? "declined" : "caught"}`,
+      "src/skate/grind.ts — catch() with no grindWanted widening — held declines exactly like bare",
+    );
+  }
+
+  // The charge: a tap pops the pinned ollie to the decimal; a short hold
+  // (inside the deadband) is byte-identical with it; a long hold buys real
+  // air. Holds are SECONDS, not frames — the deadband is 0.12 s, so five
+  // frames at 30 fps is already past it and correctly pops bigger. Ridden on
+  // the real model, apex measured off `position.y` MINUS the spawn height it
+  // started at (the pinned 1.5872 m is air, not altitude).
+  {
+    const ride = (fps, holdSeconds) => {
+      const dt = 1 / fps;
+      const keys = hands(dt);
+      const model = new SkateModel({ onPush: () => {}, onPop: () => {} }, STREET_SPOT);
+      const startY = model.position.y;
+      const holdFrames = Math.max(1, Math.round(holdSeconds / dt));
+      let apex = 0;
+      const total = holdFrames + Math.round(3 / dt);
+      for (let i = 0; i < total; i++) {
+        const input = keys(i < holdFrames ? ["Space"] : []);
+        model.update(input, dt);
+        apex = Math.max(apex, model.position.y);
+      }
+      return apex - startY;
+    };
+    const got = RATES.map((fps) => {
+      const tap = ride(fps, 0);
+      const short = ride(fps, 0.08);
+      const charged = ride(fps, 0.75);
+      return { tap, short, charged };
+    });
+    check(
+      "a tap pops the pinned ollie, a short hold matches it exactly",
+      got.every((r) => Math.abs(r.tap - 1.5872) < 0.15 && r.short === r.tap),
+      RATES.map((fps, i) => `${fps}fps tap ${got[i].tap.toFixed(4)} short ${got[i].short.toFixed(4)}`).join(" · "),
+      "src/skate/skate-model.ts — charge scaling with no deadband — a 5-frame hold out-airs the tap",
+    );
+    check(
+      "a long hold buys clearly bigger air",
+      got.every((r) => r.charged > r.tap * 1.2),
+      RATES.map((fps, i) => `${fps}fps charged ${got[i].charged.toFixed(3)} vs tap ${got[i].tap.toFixed(3)}`).join(" · "),
+      "src/skate/skate-model.ts — pop() ignoring chargeT — charged apex equals the tap",
+    );
+  }
+
+  // The revert, end to end: push, pop, land, V inside the window — the line
+  // banks a Revert. V well after the window (2.5 s — counted in SECONDS, not
+  // frames, so the window means the same at every rate) buys nothing.
+  {
+    const run = (fps, vAt) => {
+      const dt = 1 / fps;
+      const keys = hands(dt);
+      const trickIds = [];
+      const model = new SkateModel({ onPush: () => {}, onPop: () => {}, onTrick: (id) => trickIds.push(id) }, STREET_SPOT);
+      let landedAt = -1;
+      let wasAir = false;
+      const total = Math.round(8 / dt);
+      for (let i = 0; i < total; i++) {
+        // Push for two seconds, tap an ollie, then hands off except V.
+        const hold = i < Math.round(2 / dt) ? ["KeyW"] : i < Math.round(2 / dt) + 1 ? ["Space"] : [];
+        const input = keys(i === vAt ? ["KeyV"] : hold);
+        model.update(input, dt);
+        if (model.state === "air") wasAir = true;
+        if (wasAir && model.state === "rolling" && landedAt < 0) landedAt = i;
+      }
+      return { trickIds, landedAt };
+    };
+    const got = RATES.map((fps) => {
+      const probe = run(fps, -1);
+      if (probe.landedAt < 0) return { early: false, late: false, landedAt: -1 };
+      const early = run(fps, probe.landedAt + 5);
+      const late = run(fps, probe.landedAt + Math.round(2.5 * fps));
+      return {
+        early: early.trickIds.includes("revert"),
+        late: late.trickIds.includes("revert"),
+        landedAt: probe.landedAt,
+      };
+    });
+    check(
+      "V just after touchdown banks a Revert",
+      got.every((r) => r.landedAt >= 0 && r.early === true),
+      RATES.map((fps, i) => `${fps}fps landed@${got[i].landedAt} revert:${got[i].early}`).join(" · "),
+      "src/skate/skate-model.ts — no revert gate in the roll — V after landing banks nothing",
+    );
+    check(
+      "V eighty frames later buys nothing",
+      got.every((r) => r.landedAt < 0 || r.late === false),
+      RATES.map((fps, i) => `${fps}fps late-revert:${got[i].late}`).join(" · "),
+      "src/skate/skate-model.ts — revert with no window — a stale V still banks",
+    );
+  }
+  // Difficulty: the catch floor breathes with it — chill takes a 1.5 m/s
+  // roll normal slides past; gnarly waves off a 2.0 the normal game keeps.
+  // Node has no localStorage, so the harness lends the settings module an
+  // in-memory one (tools/ is outside the game — no seam in shipped code).
+  {
+    const shim = (() => {
+      const store = new Map();
+      return {
+        getItem: (k) => (store.has(k) ? store.get(k) : null),
+        setItem: (k, v) => void store.set(k, v),
+        removeItem: (k) => void store.delete(k),
+      };
+    })();
+    globalThis.localStorage = shim;
+    const { setDifficulty } = await import("../src/skate/difficulty.ts");
+    const rail = {
+      id: "matrix-rail-diff",
+      a: new THREE.Vector3(-5, 1, 0),
+      b: new THREE.Vector3(5, 1, 0),
+      kind: "rail",
+      surface: "metal",
+      radius: 0.3,
+    };
+    const attempt = (speed) => {
+      const g = new Grinder();
+      return g.catch(
+        {
+          x: 0, y: 1.2, z: 0.2, yPrev: 1.2, heading: Math.PI / 2, course: Math.PI / 2,
+          speed, stance: "regular",
+        },
+        [rail],
+      );
+    };
+    setDifficulty("normal");
+    const normalSlow = attempt(1.5);
+    const normalFast = attempt(2.0);
+    setDifficulty("chill");
+    const chillSlow = attempt(1.5);
+    setDifficulty("gnarly");
+    const gnarlyFast = attempt(2.0);
+    setDifficulty("normal");
+    delete globalThis.localStorage;
+    check(
+      "chill catches the 1.5 roll normal slides past",
+      normalSlow === null && chillSlow !== null,
+      `normal ${normalSlow === null ? "declined" : "caught"} · chill ${chillSlow === null ? "declined" : "caught"}`,
+      "src/skate/grind.ts — catch floor ignoring difficultyTuning — chill declines exactly like normal",
+    );
+    check(
+      "gnarly waves off the 2.0 normal keeps",
+      normalFast !== null && gnarlyFast === null,
+      `normal ${normalFast === null ? "declined" : "caught"} · gnarly ${gnarlyFast === null ? "declined" : "caught"}`,
+      "src/skate/grind.ts — catch floor ignoring difficultyTuning — gnarly catches exactly like normal",
     );
   }
 }

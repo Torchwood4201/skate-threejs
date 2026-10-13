@@ -78,6 +78,11 @@ import { writeFile, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 
 const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+// Linux/CI override: `CHROME_BIN=/usr/bin/chromium node ... gpu-audit.mjs`.
+// The default stays the machine this harness was measured on; the override
+// only swaps the binary, never the flags, viewport or DPR — so a census taken
+// elsewhere is comparable by construction, modulo the driver's own numbers.
+const CHROME_BIN = process.env.CHROME_BIN ?? CHROME;
 
 function arg(name, fallback) {
   const i = process.argv.indexOf(`--${name}`);
@@ -992,7 +997,7 @@ function printAssets(rows) {
 async function runTier(key) {
   const cfg = RUNS[key];
   const browser = await chromium.launch({
-    executablePath: CHROME,
+    executablePath: CHROME_BIN,
     headless: true,
     args: [
       "--use-angle=metal",

@@ -21,6 +21,7 @@ import * as THREE from "three";
 import type { GrindLine, SurfaceKind } from "../world/surface";
 import { lineHeading } from "../world/surface";
 import type { GrindKind, GrindState, Stance } from "./contracts";
+import { difficultyTuning } from "./difficulty";
 
 // ---------------------------------------------------------------------------
 // Feel constants
@@ -139,6 +140,18 @@ const RISE_SLOPE = Math.tan((60 * Math.PI) / 180);
  * without this every roll past a ledge ends stuck on top of it.
  */
 const MIN_CATCH_SPEED = 1.8;
+/**
+ * The catch window with the difficulty applied — reach/above/below breathe
+ * with it, the angle bands and the crest do not (those are geometry truth,
+ * not forgiveness). Normal returns the record itself, so every pinned number
+ * reads exactly what it always read.
+ */
+function catchWindow(kind: GrindLine["kind"]): CatchWindow {
+  const k = difficultyTuning().catching;
+  const w = CATCH[kind];
+  if (k === 1) return w;
+  return { ...w, reach: w.reach * k, above: w.above * k, below: w.below * k };
+}
 /**
  * How far the board has to get from where it left a line before that line may
  * take it again — horizontally OR upward. Running off the end leaves the board
@@ -367,6 +380,15 @@ export interface GrindQuery {
   /** Along-ground speed at touchdown, m/s. Too slow and a rail will not take. */
   speed: number;
   stance: Stance;
+  /**
+   * G held: he is COMMITTED to the rail. The minimum catch speed relaxes
+   * (1.8 → 1.0 m/s) — a deliberate slow roll onto a line locks where a
+   * coasting one slides past. Nothing else moves: the bands, the crest, the
+   * rise rule, the flip test and the square-entry key all still refuse exactly
+   * what they refused. Releasing it mid-grind changes nothing; the key is
+   * about getting ON.
+   */
+  grindWanted?: boolean;
   /**
    * True when the wheels are already down and the model is asking whether the
    * line under them takes him.
@@ -737,7 +759,12 @@ export class Grinder {
     // is the new peak.
     if (this.airPeak === null || q.grounded || q.y > this.airPeak) this.airPeak = q.y;
     if (q.grounded) return null;
-    if (Math.abs(q.speed) < MIN_CATCH_SPEED) return null;
+    // G held commits: a slow deliberate roll onto the line locks. See
+    // `GrindQuery.grindWanted` — this is the ONLY thing the key relaxes. Both
+    // floors breathe with the difficulty (`catching`).
+    const d = difficultyTuning().catching;
+    const minSpeed = (q.grindWanted === true ? 1.0 : MIN_CATCH_SPEED) / d;
+    if (Math.abs(q.speed) < minSpeed) return null;
     // Is he still going up, and if so is he flying at a line or climbing past
     // one? See `RISE_SLOPE`. A dead-vertical step covers no ground at all, so
     // it is steep by definition and the guard needs no special case for it.
@@ -758,7 +785,7 @@ export class Grinder {
     let bestDir: 1 | -1 = 1;
     let bestAlong = 1;
     for (const candidate of rails) {
-      const w = CATCH[candidate.kind];
+      const w = catchWindow(candidate.kind);
       nearest(candidate, fromX, fromZ, q.x, q.z, _hit);
       if (_hit.flat > candidate.radius + w.reach) continue;
       if (_hit.flat >= bestFlat) continue;
@@ -915,7 +942,7 @@ export class Grinder {
     // the rail for the length of the ease. The catch window is exactly how far
     // outside a line the ride is willing to call it a catch, so it is also how
     // far outside one the board may be put.
-    const w = CATCH[line.kind];
+    const w = catchWindow(line.kind);
     const onX = line.a.x + (line.b.x - line.a.x) * t;
     const onZ = line.a.z + (line.b.z - line.a.z) * t;
     const onY = line.a.y + (line.b.y - line.a.y) * t;
@@ -1011,8 +1038,9 @@ export class Grinder {
     // Same sign as the ride's own lean channel, which is what the model then
     // shows the balance through. Whatever share of it went into hauling the
     // plank round is not also available to fight the wander.
-    const correct = CORRECT_RATE * (1 - (squaring === 0 ? 0 : SQUARE_TAX * across));
-    this.balanceVel += (drift + TIP_GAIN * twitch * state.balance + steer * correct) * dt;
+    const correct = CORRECT_RATE * difficultyTuning().correct * (1 - (squaring === 0 ? 0 : SQUARE_TAX * across));
+    this.balanceVel +=
+      (drift + TIP_GAIN * difficultyTuning().tip * twitch * state.balance + steer * correct) * dt;
     this.balanceVel *= Math.exp(-BALANCE_DAMP * dt);
     state.balance = THREE.MathUtils.clamp(state.balance + this.balanceVel * dt, -1, 1);
     if (Math.abs(state.balance) >= 1) return this.leave(state, "bail");

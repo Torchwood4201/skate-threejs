@@ -35,17 +35,39 @@
 // press and release land a frame or two apart and the crouch barely starts.
 //
 // The layout, which the whole milestone assumes:
+//
+// KEYBOARD — the mash-up's arcade row on top of the riding keys:
 //   V / W / Up      push          A / D / ← →   carve, and SPIN in the air
-//   S / Down        brake, and S + A/D is a ground pivot
-//   Space           hold to load, release to pop (and pops out of a grind)
-//   F kickflip      G heelflip    C 360 shove-it
-//   X (held)        grab — A/D/S while reaching names it
-//   Shift (held) manual            Q (held) nose manual
-//   E (held)        SLIDE ACROSS — the deck laid sideways over a line. Riding
-//                   onto one needs no key at all.
+//   S / B / Down    brake — B with A/D powerslides (a pivot, at any speed)
+//   Space           hold to load, release to pop — hold LONGER for bigger air
+//                   (and pops out of a grind)
+//   J kickflip      L heelflip    I tre flip    K shove-it (F/G/C still work)
+//   U O Y H N       grabs: Indy · Melon · Method · Nose · Tail (X still grabs)
+//   M manual        Shift + M (or Q) nose manual — Shift alone still manuals
+//   G (held)        commit to the rail — lines take you slower
+//   V               revert — just landed? keep the line rolling
 //   R reset
 // (Escape pauses and the mouse looks around; neither is this file's — the boot
 // owns the pause key and the follow camera owns the pointer.)
+//
+// Deliberate deviations from the pasted spec, all measured against what the
+// hands are already doing:
+//   · A stays steering. The spec's "Space/A for bigger pop" would put the pop
+//     on the steer-left key — Space is the pop, and the charge scales it.
+//   · Shift stays manual (moved there twice at the player's word); Space-hold
+//     is the wind-up the spec's "hold to load" names, on every device.
+//   · Nollie has no key: there is no nose-pop in the physics, only the ollie.
+//     Y on the pad keeps its nollie stand-in (Space through another door).
+//
+// THE PAD (the PDF's Flick-it layout, and ONLY it — `skate-gamepad.ts`):
+//   LEFT X          steer · dwell aims grabs   A push · B brake/powerslide
+//   RIGHT ↓ hold    crouch · release pops      RIGHT ↑ ollie
+//   RIGHT up-left   kickflip · up-right heelflip · down-diagonals shove-it
+//   LT / RT         grab (left / right hand)   LB square-across · RB manual
+//   X step off · R3 bail (both reset) · Y nollie · Start pause · Back reset
+//   Left Y and the d-pad drive nothing — they are not in the PDF.
+// (Nose manual, tre flip, grind-commit and revert have no pad path yet —
+// recorded open in the feeder, not silent.)
 //
 // **THE HOLDS MOVED TWICE on 2026-07-29, and the order matters.**
 //
@@ -76,6 +98,7 @@ import type { SkateInput } from "./skate-model";
 // is `HANDLED` at the bottom, which is the longer list. Type-only, so it costs
 // the bundle nothing and the harnesses' type-stripping erases it.
 import type { FlickCode, TouchControlCode } from "../ui/touch-controls";
+import { GRAB_KEYS, type GrabFlavour } from "./tricks";
 
 const STEER_SMOOTH = 9; // how fast the stick swings to the pressed direction
 /**
@@ -99,7 +122,16 @@ export class SkateInputSource {
   private kickflipPressed = false;
   private heelflipPressed = false;
   private shoveitPressed = false;
+  private treflipPressed = false;
+  private revertPressed = false;
   private resetPressed = false;
+  /**
+   * Which grab key is holding (U/O/Y/H/N name it outright) — null when the
+   * grab comes off X and the stick, or when nothing is held. Last press wins;
+   * releasing back to another held grab key hands it over rather than
+   * dropping it.
+   */
+  private grabKey: GrabFlavour | null = null;
   /**
    * The controller's Start button. A latch like reset, not a key: pause
    * belongs to the boot (Escape), so the loop polls this and raises the same
@@ -191,10 +223,14 @@ export class SkateInputSource {
    */
   private press(code: string): void {
     this.held.add(code);
-    if (code === "KeyF") this.kickflipPressed = true;
-    if (code === "KeyG") this.heelflipPressed = true;
-    if (code === "KeyC") this.shoveitPressed = true;
+    if (code === "KeyF" || code === "KeyJ") this.kickflipPressed = true;
+    if (code === "KeyG" || code === "KeyL") this.heelflipPressed = true;
+    if (code === "KeyC" || code === "KeyK") this.shoveitPressed = true;
+    if (code === "KeyI") this.treflipPressed = true;
+    if (code === "KeyV") this.revertPressed = true;
     if (code === "KeyR") this.resetPressed = true;
+    const flavour = GRAB_KEYS[code];
+    if (flavour !== undefined) this.grabKey = flavour;
   }
 
   /**
@@ -216,6 +252,18 @@ export class SkateInputSource {
       this.chargeSpent = false;
     }
     this.held.delete(code);
+    // Letting go of a naming grab key hands the grab back — to another held
+    // naming key if there is one, else to X-and-the-stick (null).
+    if (GRAB_KEYS[code] !== undefined) {
+      this.grabKey = null;
+      for (const held of this.held) {
+        const flavour = GRAB_KEYS[held];
+        if (flavour !== undefined) {
+          this.grabKey = flavour;
+          break;
+        }
+      }
+    }
   }
 
   private onBlur = (): void => {
@@ -351,6 +399,7 @@ export class SkateInputSource {
     this.windingWas = false;
     this.pushLocked = false;
     this.pausePressed = false;
+    this.grabKey = null;
     this.touchStick = 0;
   }
 
@@ -390,7 +439,11 @@ export class SkateInputSource {
       this.held.has("KeyV") || this.held.has("KeyW") || this.held.has("ArrowUp");
     // Read here rather than in the key handler, so a flick and a push spend the
     // wind-up on the same frame the ride is about to act on.
-    const flicked = this.kickflipPressed || this.heelflipPressed || this.shoveitPressed;
+    const flicked =
+      this.kickflipPressed ||
+      this.heelflipPressed ||
+      this.shoveitPressed ||
+      this.treflipPressed;
     const winding = this.held.has("Space");
     // The player's rule is about REACHING for the push mid-crouch, so it is the
     // moment the push starts that calls the jump off — not the push key merely
@@ -427,7 +480,7 @@ export class SkateInputSource {
 
     const input: SkateInput = {
       throttle,
-      brake: this.held.has("KeyS") || this.held.has("ArrowDown"),
+      brake: this.held.has("KeyS") || this.held.has("ArrowDown") || this.held.has("KeyB"),
       steer: this.steerSmoothed,
       // Spending the wind-up stands him back up on the spot — the crouch is
       // released the same frame the push begins, not when Space comes up.
@@ -436,19 +489,27 @@ export class SkateInputSource {
       kickflipPressed: this.kickflipPressed,
       heelflipPressed: this.heelflipPressed,
       shoveitPressed: this.shoveitPressed,
-      // The grab moved here off Shift on 2026-07-29: it is the SHORT hold — a
-      // stab in the air that is over by the landing — and the curled-under
-      // reach that makes X wrong for a grind is fine for a stab. See the
-      // header block for the whole of the reasoning.
-      grabHeld: this.held.has("KeyX"),
-      // THE MANUAL MOVED TO SHIFT on 2026-07-29, second swap of the day, at the
-      // player's word once he had ridden the first one: *"поменяй еще
-      // пожалуйста shift и E."* Both of these are multi-second holds fought
-      // against A/D, so the pinky's home key was always going to be wanted by
-      // one of them; having ridden both he wants it under the manual. Nothing
-      // else about either trick changes.
-      manualHeld: this.held.has("ShiftLeft") || this.held.has("ShiftRight"),
-      noseManualHeld: this.held.has("KeyQ"),
+      treflipPressed: this.treflipPressed,
+      revertPressed: this.revertPressed,
+      // The mash-up's grab row reaches straight for a flavour; X still reads
+      // the stick, and the book prefers the key when both are on.
+      grabHeld:
+        this.held.has("KeyX") ||
+        this.held.has("KeyU") ||
+        this.held.has("KeyO") ||
+        this.held.has("KeyY") ||
+        this.held.has("KeyH") ||
+        this.held.has("KeyN"),
+      grabKey: this.grabKey,
+      // M manuals like Shift does; Shift + M together (or Q) rides the nose.
+      // Shift alone keeps its old meaning — the pinky's home key stays put.
+      manualHeld:
+        this.held.has("ShiftLeft") || this.held.has("ShiftRight") || this.held.has("KeyM"),
+      noseManualHeld:
+        this.held.has("KeyQ") ||
+        ((this.held.has("ShiftLeft") || this.held.has("ShiftRight")) && this.held.has("KeyM")),
+      // G, held — the grind key. See `SkateInput.grindHeld` for what holding
+      // it buys and what it deliberately does not.
       // Held, not tapped, and not a toggle. A toggle is a mode you can be in
       // without knowing it, and a mode that survives a bail, a reset and a
       // minute of not thinking about it is its own way of being surprised.
@@ -469,11 +530,14 @@ export class SkateInputSource {
       // the instant before the deck lands, so the finger that was being spared
       // for the length of a handrail has less to do than it did.
       slideHeld: this.held.has("KeyE"),
+      grindHeld: this.held.has("KeyG"),
     };
     this.olliePressed = false;
     this.kickflipPressed = false;
     this.heelflipPressed = false;
     this.shoveitPressed = false;
+    this.treflipPressed = false;
+    this.revertPressed = false;
     return input;
   }
 }
@@ -483,14 +547,25 @@ const HANDLED = new Set([
   "KeyA",
   "KeyS",
   "KeyD",
+  "KeyB",
   "KeyC",
   "KeyE",
   "KeyF",
   "KeyG",
+  "KeyH",
+  "KeyI",
+  "KeyJ",
+  "KeyK",
+  "KeyL",
+  "KeyM",
+  "KeyN",
+  "KeyO",
   "KeyQ",
   "KeyR",
+  "KeyU",
   "KeyV",
   "KeyX",
+  "KeyY",
   "Space",
   // Both Shifts, since the MANUAL moved onto them (the grind held them for one
   // round before the second swap). A Shift that reaches the page does nothing on

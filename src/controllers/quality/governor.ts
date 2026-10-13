@@ -132,9 +132,34 @@ const STUTTER_WINDOW_MS = 4000;
 const STUTTER_COUNT = 4;
 /** ~1 s of memory at 60 fps. One frame cannot swing it; a slow machine holds it high. */
 const EWMA_ALPHA = 0.016;
+/**
+ * PROMOTE-ON-SMOOTH — the honest way to re-earn a higher pace. `phone-low`
+ * boots pacing at a steady 30 fps (its table entry's own intent), and the
+ * ladder below only moves knobs WITHIN a tier — it can never pace faster
+ * than the tier asks. So a phone that keeps up with plenty to spare sits at
+ * 30 fps forever, which is the ceiling M12 recorded, not "boot low and
+ * recover". After a long clean stretch at base, the governor paces 60
+ * through the existing `setFrameCap` door — no other knob moves, no asset
+ * rereads, nothing a rung does not already do.
+ *
+ * Why "clean" and not "headroom": the frame cap pacing destroys the headroom
+ * signal. A phone-low device pacing 30 reports 33.3 ms frames whether it is
+ * coasting or hanging on — the delta the governor is fed cannot tell them
+ * apart, so half-budget thresholds would promote nobody, ever. (Render-cost
+ * timing would, but `performance.now` around a WebGL submit measures the CPU
+ * queue, not the GPU's fill load — the wrong instrument for the question.)
+ * So the bet is explicit: ninety clean seconds (no step-down, no hitch,
+ * average under budget) earns 60; a machine that cannot hold it is collected
+ * by the same ladder, which revokes the promotion the moment it steps down.
+ * Worst case is one bounded rescue cycle on a weak phone, then base forever.
+ * Only tiers that ask under 60 can ever get here — in practice `phone-low`.
+ */
+const PROMOTE_WINDOW_MS = 90000;
+const PROMOTE_CAP = 60;
 
 export class QualityGovernor {
   private tier: QualityTier;
+  private callbacks: GovernorCallbacks;
   private steps: Array<{
     name: string;
     apply: () => void;
@@ -148,6 +173,12 @@ export class QualityGovernor {
   private applied = 0;
   private slowSince: number | null = null;
   private goodSince: number | null = null;
+  /** Smooth-stretch clock for promote-on-smooth — null until earned. */
+  private smoothSince: number | null = null;
+  /** True once paced above the tier's ask; a step-down spends it for good. */
+  private promoted = false;
+  /** Any step-down, before or after a promotion, ends the question. */
+  private promoteBlocked = false;
   private lastMemReport = 0;
   private paused = false;
   private startedAt = 0;
@@ -162,6 +193,7 @@ export class QualityGovernor {
     options: GovernorOptions = {},
   ) {
     this.tier = tier;
+    this.callbacks = callbacks;
     this.rendererRef = renderer;
     const c = callbacks;
     const playerChose = options.postIsPlayerChoice;
@@ -282,7 +314,9 @@ export class QualityGovernor {
       // `goodSince` is still cleared, because it is the opposite claim: a game
       // that just stalled for 274 ms has not been smooth for twenty seconds,
       // whatever its average says, and must not step UP on the strength of one.
+      // Same for the promotion clock: smooth means no hitches, full stop.
       this.goodSince = null;
+      this.smoothSince = null;
       this.noteHitch(now);
       this.reportMemory(now);
       return;
@@ -302,6 +336,7 @@ export class QualityGovernor {
     // frame under it is not an acquittal.
     if (this.ewmaMs > budgetMs) {
       this.goodSince = null;
+      this.smoothSince = null;
       if (this.slowSince == null) this.slowSince = now;
       else if (now - this.slowSince > SLOW_WINDOW_MS) {
         this.stepDown();
@@ -314,11 +349,39 @@ export class QualityGovernor {
         this.stepUp();
         this.goodSince = null;
       }
+      this.watchPromotion(now, budgetMs);
     }
 
     this.reportMemory(now);
   }
 
+  /**
+   * Promote-on-smooth, judged only in frames the average already acquitted.
+   * Every condition is a separate refusal: the tier must ask under 60, the
+   * ladder must be fully reverted (nothing borrowed), the average must be
+   * under budget, no hitch may have fired, and no step-down may ever have
+   * happened. A hitch clears the clock in the outlier branch above; a slow
+   * average clears it in the branch above this call. What is left is ninety
+   * clean seconds, and only those pace up.
+   */
+  private watchPromotion(now: number, budgetMs: number): void {
+    if (this.promoted || this.promoteBlocked || this.tier.frameCap >= PROMOTE_CAP) {
+      return;
+    }
+    if (this.applied !== 0 || this.ewmaMs >= budgetMs) {
+      this.smoothSince = null;
+      return;
+    }
+    if (this.smoothSince == null) {
+      this.smoothSince = now;
+      return;
+    }
+    if (now - this.smoothSince > PROMOTE_WINDOW_MS) {
+      this.smoothSince = null;
+      this.promoted = true;
+      this.callbacks.setFrameCap?.(PROMOTE_CAP);
+    }
+  }
   /**
    * Record one discarded outlier, and step down if they have stopped being
    * outliers and become the experience. See STUTTER_WINDOW_MS.
@@ -380,6 +443,11 @@ export class QualityGovernor {
   }
 
   private stepDown(): void {
+    // Any step down ends the promotion question for the session — before one
+    // (the machine struggled) or after one (the bet lost). If the ladder walks
+    // all the way to the frame-cap rung it paces 30 explicitly, which revokes
+    // a promotion outright rather than leaving 60 standing behind the ladder.
+    this.promoteBlocked = true;
     // Walk past any rung that is not the governor's to spend — a skipped rung
     // costs no time, so the ladder does not stall in front of it.
     while (this.applied < this.steps.length) {
@@ -397,6 +465,7 @@ export class QualityGovernor {
         step.pendingRecovery = false;
         step.failures++;
       }
+      if (step.name === "framecap-30") this.promoted = false;
       step.apply();
       this.applied++;
       return;

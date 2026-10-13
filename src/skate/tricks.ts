@@ -72,9 +72,11 @@ const SWITCH_BONUS = 1.25;
 /** Every half turn is worth half the trick again — 180 ×1.5, 360 ×2, 540 ×2.5. */
 const SPIN_STEP = 0.5;
 /**
- * The ceiling on the combo multiplier — the tenth link is the last one that
- * buys anything, so a line worth having is a line that keeps ADDING value
- * rather than one that runs forever.
+ * The ceiling on the combo multiplier — the fifth link is the last one that
+ * buys anything. THPS-shaped: a five-trick line pays ×5 and a ten-trick line
+ * pays ×5 too, so a line worth having is a line that keeps ADDING value
+ * rather than one that runs forever. (Was ten until the mash-up spec pinned
+ * the THPS ×5 cap; `tools/integration-check.mjs` asserts the cap number.)
  *
  * WHERE THE COMBO MULTIPLIER LIVES — one layer, and this is not it.
  *
@@ -95,7 +97,7 @@ const SPIN_STEP = 0.5;
  * `comboMultiplier` below is the HUD's one way in. Anything added here has to
  * be per-trick, not per-line.
  */
-const COMBO_MAX_MULT = 10;
+const COMBO_MAX_MULT = 5;
 /** Below this you are not rolling, you are balancing on a stationary board. */
 const MANUAL_MIN_SPEED = 1.5;
 // A manual you never come down from stops being a link and starts being a
@@ -128,19 +130,31 @@ const GRAB_STEER_DEADZONE = 0.4;
 export const SHOVEIT_CALLOUT = "360 Shove-it";
 
 /**
- * The four grabs, off one clip and one key. Which one you get is where the
- * stick was when you reached down — neutral is an indy, back is a method, and
- * the two sides are the heel and toe edges of the deck. The bonuses are small
- * and reflect the reach, not the score: a method is the furthest.
+ * The five grabs, off one clip and five keys. U/O/Y/H/N reach straight for
+ * Indy, Melon, Method, Nosegrab and Tailgrab; X still grabs too, and then
+ * which one you get is where the stick was when you reached down — neutral
+ * is an indy, back is a method, and the two sides are the heel and toe edges
+ * of the deck. The bonuses are small and reflect the reach, not the score: a
+ * method is the furthest.
  */
 const GRAB_BONUS: Readonly<Record<GrabFlavour, number>> = {
   Indy: 0,
   Melon: 20,
   Nosegrab: 20,
   Method: 50,
+  Tailgrab: 30,
 };
 
-type GrabFlavour = "Indy" | "Melon" | "Nosegrab" | "Method";
+export type GrabFlavour = "Indy" | "Melon" | "Nosegrab" | "Method" | "Tailgrab";
+
+/** Which key reaches straight for which grab — the mash-up's grab row. */
+export const GRAB_KEYS: Readonly<Record<string, GrabFlavour>> = {
+  KeyU: "Indy",
+  KeyO: "Melon",
+  KeyY: "Method",
+  KeyH: "Nosegrab",
+  KeyN: "Tailgrab",
+};
 
 /**
  * The pressed/held flags a trick can be resolved from. `SkateInput` satisfies
@@ -154,7 +168,10 @@ export interface TrickInput {
   kickflipPressed?: boolean;
   heelflipPressed?: boolean;
   shoveitPressed?: boolean;
+  treflipPressed?: boolean;
   grabHeld?: boolean;
+  /** A grab key (U/O/Y/H/N) names the flavour outright — beats the stick. */
+  grabKey?: GrabFlavour | null;
   manualHeld?: boolean;
   noseManualHeld?: boolean;
   /** -1 left, +1 right. Names the grab. */
@@ -207,9 +224,11 @@ export interface TrickContext {
  */
 export const TRICKS: TrickTable = {
   ollie: { id: "ollie", name: "Ollie", score: 100, key: "space", where: "ground", clip: "ollie" },
-  kickflip: { id: "kickflip", name: "Kickflip", score: 250, key: "f", where: "air", clip: "kickflip" },
-  heelflip: { id: "heelflip", name: "Heelflip", score: 250, key: "g", where: "air", clip: "heelflip" },
-  shoveit: { id: "shoveit", name: "Shove-it", score: 200, key: "c", where: "air", clip: "shoveit" },
+  kickflip: { id: "kickflip", name: "Kickflip", score: 250, key: "j", where: "air", clip: "kickflip" },
+  heelflip: { id: "heelflip", name: "Heelflip", score: 250, key: "l", where: "air", clip: "heelflip" },
+  shoveit: { id: "shoveit", name: "Shove-it", score: 200, key: "k", where: "air", clip: "shoveit" },
+  treflip: { id: "treflip", name: "Tre Flip", score: 400, key: "i", where: "air", clip: "kickflip" },
+  revert: { id: "revert", name: "Revert", score: 100, key: "v", where: "ground", clip: "ollie" },
   grab: { id: "grab", name: "Grab", score: 150, key: "shift", where: "air", clip: "grab", hold: true },
   manual: { id: "manual", name: "Manual", score: 120, key: "e", where: "ground", clip: "manual", hold: true },
   noseManual: {
@@ -323,8 +342,8 @@ export function trickName(parts: TrickNaming): string {
 }
 
 /**
- * Scored links → multiplier. The first trick is worth face value, the tenth is
- * worth ten, and the eleventh is worth ten as well — see `COMBO_MAX_MULT`.
+ * Scored links → multiplier. The first trick is worth face value, the fifth is
+ * worth five, and the sixth is worth five as well — see `COMBO_MAX_MULT`.
  *
  * Called by `Hud.commitBank`, which is the only place a combo is ever
  * multiplied. It takes the count of SCORED links: a rail he is still on and a
@@ -403,6 +422,7 @@ export class TrickBook {
     if (input.kickflipPressed) return "kickflip";
     if (input.heelflipPressed) return "heelflip";
     if (input.shoveitPressed) return "shoveit";
+    if (input.treflipPressed) return "treflip";
     if (input.olliePressed && ctx.grounded) return "ollie";
     return null;
   }
@@ -435,9 +455,10 @@ export class TrickBook {
 
     if (ctx.airborne) {
       if (!grabWanted) return this.hold(null, ctx.grounded, manualWanted);
-      // The stick at the moment he reaches down names the grab, and it is
-      // latched: steering out of a melon does not make it an indy.
-      if (this.holding !== "grab") this.grabFlavour = pickGrab(input);
+      // A grab key names its flavour outright (U/O/Y/H/N); X still reads the
+      // stick the old way. Latched either way: steering out of a melon does
+      // not make it an indy.
+      if (this.holding !== "grab") this.grabFlavour = input.grabKey ?? pickGrab(input);
       return this.hold("grab", ctx.grounded, manualWanted);
     }
 

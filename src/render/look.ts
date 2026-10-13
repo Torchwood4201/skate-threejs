@@ -284,6 +284,21 @@ export interface LookStack {
    */
   setPostEnabled(enabled: boolean): void;
   /**
+   * The row-12 cadence cache's per-frame verdict: did the shadow grid move?
+   * Read off `Field.trackShadow`'s return by the boot loop, every frame,
+   * before `render`. A missed call reads as moved (the field starts true),
+   * so the worst a dropped call buys is the raster it always paid.
+   */
+  setShadowMoved(moved: boolean): void;
+  /**
+   * Force the next frame to re-rasterise the shadow map, whatever the
+   * cadence says. The governor's shadow-map realloc calls this after
+   * disposing the map — a fresh allocation with `needsUpdate` false would
+   * otherwise read as two shadowless frames on the weakest machine in the
+   * game, the one the rung exists to rescue.
+   */
+  refreshShadow(): void;
+  /**
    * The internal render scale — one of `RENDER_SCALES`. 1 is off and is where
    * every tier starts. Cheap: it re-sizes the chain's existing targets rather
    * than rebuilding them, so it can be dragged live from a settings screen.
@@ -734,6 +749,13 @@ export function createLookStack(
    */
   let shadowTick = 0;
   const phoneShadow = isPhoneTier(tier);
+  /**
+   * The boot loop's per-frame verdict (see `LookStack.setShadowMoved`), plus
+   * a one-shot force flag for reallocations. Desktop-only machinery: the
+   * phone branch below is byte-for-byte what it was.
+   */
+  let shadowMoved = true;
+  let shadowForce = false;
 
   /**
    * The lens plate, built LAZILY and then kept.
@@ -1371,10 +1393,20 @@ export function createLookStack(
       // `WebGLRenderer` (`ui/menu-stage.ts:410`) whose own shadow state is
       // untouched by this.
       renderer.shadowMap.autoUpdate = false;
-      // Phone tiers refresh every second frame (see `shadowTick` above);
-      // desktop refreshes every frame, exactly as before.
+      // Row 12, conservative form (NOT the split-maps design — that one ends
+      // with the player's eye on a dual-PCF capture this environment cannot
+      // take, so it stays queued). The phone branch is untouched: every-second
+      // frame, as measured. On desktop the map re-renders when the snapped
+      // grid moved — same grid, same casters, same resolution, so the pixels
+      // are identical by construction — and otherwise every third frame, which
+      // bounds a still-camera skater shadow at two frames stale (~33 ms at
+      // 60 fps, while riding the camera moves and it refreshes every frame
+      // anyway). `refreshShadow` (governor realloc) forces regardless.
       shadowTick++;
-      renderer.shadowMap.needsUpdate = phoneShadow ? shadowTick % 2 === 1 : true;
+      renderer.shadowMap.needsUpdate = phoneShadow
+        ? shadowTick % 2 === 1
+        : shadowForce || shadowMoved || shadowTick % 3 === 2;
+      shadowForce = false;
 
       // ABOVE the governor's bypass, because this is not part of the picture
       // the governor is switching off: a machine that has dropped to
@@ -1504,6 +1536,12 @@ export function createLookStack(
     },
     setPostEnabled(value) {
       enabled = value;
+    },
+    setShadowMoved(moved: boolean) {
+      shadowMoved = moved;
+    },
+    refreshShadow() {
+      shadowForce = true;
     },
     /**
      * The internal resolution. No rebuild and no reallocation of its own: it

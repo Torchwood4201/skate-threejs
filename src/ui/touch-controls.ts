@@ -62,20 +62,35 @@ const TOUCH_PRIMARY_QUERY = "(pointer: coarse) and (hover: none)";
  *
  * It lives HERE and not in `src/skate/input.ts` on purpose: "which keys the
  * touch layer has buttons for" is a fact about the touch layer. The ride's own
- * vocabulary is `HANDLED` in that file, which is a longer list — a code in this
+ * vocabulary is `HANDLED` in that file, which is the longer list — a code in this
  * union that the ride does not read would simply do nothing, and a code the ride
  * reads that is not in this union is a control the phone has decided not to
- * carry (heelflip, shove-it, nose manual, slide-across; see the layer's own
- * area-budget note).
+ * carry (tre flip, revert, grind-commit, nose manual, brake key, grab keys,
+ * slide-across; heelflip and shove-it ride the flick pad instead — see the
+ * layer's own area-budget note). The union names the mash-up codes anyway:
+ * it is a type (erased at build), so a future widget can press them with no
+ * plumbing change, and today it costs nothing.
  */
 export type TouchControlCode =
   | "KeyW"
   | "KeyS"
+  | "KeyB"
   | "Space"
   | "KeyF"
   | "KeyG"
   | "KeyC"
+  | "KeyJ"
+  | "KeyL"
+  | "KeyI"
+  | "KeyK"
   | "KeyX"
+  | "KeyU"
+  | "KeyO"
+  | "KeyY"
+  | "KeyH"
+  | "KeyN"
+  | "KeyM"
+  | "KeyV"
   | "ShiftLeft"
   | "KeyQ"
   | "KeyE"

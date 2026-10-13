@@ -28,9 +28,11 @@ export type TrickId =
   | "kickflip"
   | "heelflip"
   | "shoveit"
+  | "treflip"
   | "grab"
   | "manual"
   | "noseManual"
+  | "revert"
   | GrindKind;
 
 /**
@@ -43,9 +45,11 @@ export type TrickName =
   | "Kickflip"
   | "Heelflip"
   | "Shove-it"
+  | "Tre Flip"
   | "Grab"
   | "Manual"
   | "Nose Manual"
+  | "Revert"
   | "50-50"
   | "Boardslide"
   | "Nosegrind"
@@ -53,7 +57,27 @@ export type TrickName =
   | "Smith";
 
 /** The key that fires a trick, as the control layout names it. */
-export type TrickKey = "space" | "f" | "g" | "c" | "shift" | "e" | "q" | "land";
+export type TrickKey =
+  | "space"
+  | "f"
+  | "g"
+  | "c"
+  | "j"
+  | "l"
+  | "i"
+  | "k"
+  | "u"
+  | "o"
+  | "y"
+  | "h"
+  | "n"
+  | "m"
+  | "shift"
+  | "e"
+  | "q"
+  | "v"
+  | "b"
+  | "land";
 
 /** Where a trick is legal. `land` tricks are caught by landing on a line. */
 export type TrickWhere = "air" | "ground" | "grind";

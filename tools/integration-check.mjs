@@ -970,7 +970,8 @@ function hrun(h, input, seconds) {
 
 // …and the combo multiplier stops where it says it stops. `COMBO_MAX_MULT` was
 // documented in the trick book and enforced nowhere for a whole round: a
-// fourteen-link line paid ×14. Driven at the HUD, in main.ts's own order, with
+// fourteen-link line paid ×14. The mash-up spec pins the THPS ×5 cap, so the
+// fourteen-link case pays five. Driven at the HUD, in main.ts's own order, with
 // values the real trick book produced — the model cannot be made to chain
 // eleven links headlessly, and the rule lives in `Hud.commitBank` anyway.
 {
@@ -998,8 +999,8 @@ function hrun(h, input, seconds) {
     return { links, pot, banked: hud.total, mult: hud.total / pot };
   });
   check(
-    "the combo multiplier is the link count, and it stops at ten",
-    paid.every((p) => Math.abs(p.mult - Math.min(p.links, 10)) < 1e-6),
+    "the combo multiplier is the link count, and it stops at five",
+    paid.every((p) => Math.abs(p.mult - Math.min(p.links, 5)) < 1e-6),
     paid.map((p) => `${p.links} links → ${p.banked} (×${p.mult.toFixed(2)})`).join(" · "),
   );
 }

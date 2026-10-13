@@ -379,11 +379,15 @@ function buildFlickPad(input: TouchControlsOptions["input"]): {
     if (dt > FLICK_MAX_MS) return;
     if (Math.hypot(dx, dy) < FLICK_MIN_PX) return;
     // Dominant axis wins; ties go horizontal, the axis with more tricks on it.
+    // Left throws kickflip and right throws heelflip — the PDF's diagonals
+    // for a regular stance (up-left kicks, up-right heels), so a flick and
+    // its diagonal never disagree about which foot it is. Same sides as the
+    // pad's right stick (`skate-gamepad.ts`).
     const code: FlickCode =
       Math.abs(dx) >= Math.abs(dy)
         ? dx > 0
-          ? "KeyF"
-          : "KeyG"
+          ? "KeyG"
+          : "KeyF"
         : dy > 0
           ? "KeyC"
           : "Space";

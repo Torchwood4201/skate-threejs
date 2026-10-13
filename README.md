@@ -7,10 +7,11 @@ hour, with a full trick vocabulary and a physical bail.
 **▶ Play: https://genex.games/world/skate**
 
 ```
-W A S D   ride            SPACE   hold to charge an ollie
-F G C     kick / heel / shove-it  X   hold to grab
-SHIFT     manual          E       hold to slide across
-A D       balance         R       reset      ESC   pause
+W A S D   ride            SPACE   hold to charge (longer = bigger air)
+J L I K   kick / heel / tre / shove-it   U O Y H N   Indy Melon Method Nose Tail
+M         manual (Shift+M nose)          G       hold to commit to a rail
+V         revert              B       brake / powerslide
+E         slide across        R       reset      ESC   pause
 ```
 
 Everything you see was generated — models, textures, the sky, the character, the

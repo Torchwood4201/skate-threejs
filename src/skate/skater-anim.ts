@@ -234,6 +234,12 @@ const TRICK_CLIP: Readonly<Record<TrickName, string>> = {
   Kickflip: "kickflip",
   Heelflip: "heelflip",
   "Shove-it": "shoveit",
+  // A tre flip IS an ollie from the waist up, like every other flip — the
+  // board does the extra work, spun by the rig off `flipAxis: "both"`.
+  "Tre Flip": "kickflip",
+  // Never played (a revert pops nothing — it banks straight off the landing),
+  // but the record is exhaustive, so it points at the ollie like the flips do.
+  Revert: "ollie",
   Grab: "grab",
   Manual: "manual",
   "Nose Manual": "noseManual",

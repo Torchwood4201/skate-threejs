@@ -18,12 +18,13 @@ import * as THREE from "three";
 import type { QualityTier } from "../controllers/quality/tier";
 import type { GenexGltfLoader } from "../controllers/quality/gltf-loader";
 import { createField, dressField, type Field } from "./field";
+import { PARK_MAPS } from "./parks";
 import { disposeSky } from "./sky/panorama";
 // MAP 2 IS PARKED — see the REGISTRY note below. The import is commented rather
 // than deleted so this is one line to undo.
 // import { SPILLWAY_MAP } from "./spillway";
 
-export type MapId = "street" | "spillway";
+export type MapId = "street" | "spillway" | "sawmill" | "warehouse" | "haunted";
 
 export interface GameMap {
   id: MapId;
@@ -75,6 +76,7 @@ const STREET: GameMap = {
 const REGISTRY = new Map<MapId, GameMap>([
   ["street", STREET],
   // ["spillway", SPILLWAY_MAP],
+  ...PARK_MAPS.map((m): [MapId, GameMap] => [m.id, m]),
 ]);
 
 export function register(map: GameMap): void {

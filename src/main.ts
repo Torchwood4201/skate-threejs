@@ -672,6 +672,9 @@ async function boot(): Promise<void> {
         if (field.sun.shadow.map) {
           field.sun.shadow.map.dispose();
           field.sun.shadow.map = null;
+          // A fresh allocation with the cadence cache parked would read as
+          // shadowless frames — force the next raster (see `LookStack`).
+          look.refreshShadow();
         }
       },
     },
@@ -765,7 +768,8 @@ async function boot(): Promise<void> {
     runGame.setWorld(field.surface);
     // Map 2 must not sound like a city: its own track, its own canyon air, and
     // a windier speed curve. Without this line both spots play map 1's bed.
-    audio.setMap(id);
+    // The zip parks ride the street's bed — concrete parks, city air.
+    audio.setMap(id === "street" || id === "spillway" ? id : "street");
     ragdoll?.release();
     skate.reset();
     hud.resetRun();
@@ -773,8 +777,30 @@ async function boot(): Promise<void> {
     // just replaced it. Without this its sun sliders would keep driving the
     // OLD map's sun — a light that is no longer in the scene.
     lookLab.setField(field);
+    // A streamed level (the zip parks) only knows its real spawn once the
+    // geometry lands — the synchronous `reset()` above sat the player on the
+    // empty slab at the bbox middle, which for roofed parks is under the
+    // building. Seat them again when the stream arrives — but ONLY if they
+    // haven't already ridden off: yanking a moving player back to spawn
+    // would be worse than the slab. (Street/spillway spawns are analytic and
+    // correct from frame one, so for them this re-seat is a silent no-op to
+    // the same spot.)
+    const seat = skate.position.clone();
+    const npcSeat = field.surface.spawn();
     void world.map
       .dress(scene, field, tier, renderer, gltf)
+      .then(() => {
+        if (world.map.id !== id) return;
+        if (skate.position.distanceTo(seat) < 3 && Math.abs(skate.speed) < 0.5) {
+          ragdoll?.release();
+          skate.reset();
+        }
+        // …and the NPC was planted from the same slab-era spawn. If the
+        // stream moved it, plant him again — `replant`, not `setWorld`, so a
+        // minute that started during the stream-in survives.
+        const now = field.surface.spawn();
+        if (Math.hypot(now.x - npcSeat.x, now.z - npcSeat.z) > 0.5) runGame.replant();
+      })
       .catch((e) => console.warn("[spot]", e));
   };
 
@@ -1180,8 +1206,9 @@ async function boot(): Promise<void> {
       //
       // It also has to live here rather than beside the old lines: `main.ts`
       // writing `sun.position` every frame would overwrite the tuning panel's
-      // sun-angle sliders on the very next frame.
-      field.trackShadow?.(skate.position);
+      // sun-angle sliders on the very next frame. The return feeds the row-12
+      // cadence cache (`look.setShadowMoved`): a missed frame reads as moved.
+      look.setShadowMoved(field.trackShadow?.(skate.position) ?? true);
 
       audio.setRolling(skate.speed, !skate.airborne, skate.surfaceKind);
       hud.update(skate.speed, delta, skate.fakie);
@@ -1199,6 +1226,23 @@ async function boot(): Promise<void> {
       // opinion, and it is up for the same reason it is up on a rail: the fight
       // is only fair if you can see which way you are losing it.
       hud.setBalance(skate.grindState ? skate.grindState.balance : skate.manualBalance);
+      // The state pill — one word for what he is in the middle of. The mode
+      // is arithmetic over the ride's own public facts (nothing here infers):
+      // grinding beats air beats manual beats wind-up beats rolling, and a
+      // body on the floor is a bail whatever else is true.
+      hud.setRideState(
+        skate.state === "grind"
+          ? "GRIND"
+          : skate.state === "air"
+            ? "AIR"
+            : skate.state === "ragdoll"
+              ? "BAIL"
+              : skate.manualBalance !== null
+                ? "MANUAL"
+                : skate.charging
+                  ? "LOADING"
+                  : "ROLLING",
+      );
       // The clock, the marker over the NPC's head and the approach trigger, all
       // inside `!paused` deliberately: a minute that keeps spending itself
       // behind the pause screen is the player's minute being taken from them.

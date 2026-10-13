@@ -73,6 +73,7 @@ import {
   type QualitySetting,
   type QualityTier,
 } from "../controllers/quality/tier";
+import { getDifficulty, setDifficulty, type Difficulty } from "../skate/difficulty";
 import type { LookStack } from "../render/look";
 import { ChoiceList, claimKeys, installScreenStyles, screenHint, type Choice } from "./hud";
 
@@ -214,6 +215,12 @@ const STEP = 1 / TICKS;
  */
 const BOOT_SETTING: QualitySetting = getQualitySetting();
 
+/** One word each, like the quality rows. */
+const DifficultyLabel: Record<Difficulty, string> = {
+  chill: "Chill",
+  normal: "Normal",
+  gnarly: "Gnarly",
+};
 /**
  * Does this machine REFUSE part of the rung the player is pointing at?
  *
@@ -272,6 +279,7 @@ function deviceTier(): QualityTier {
 
 type Row =
   | { kind: "quality"; setting: QualitySetting }
+  | { kind: "difficulty"; level: Difficulty }
   | { kind: "volume"; channel: "music" | "sfx" }
   /**
    * The temporary look-lab door. Its own kind rather than a second `back`, for
@@ -440,6 +448,16 @@ export class SettingsScreen {
     this.paint();
   }
 
+  /**
+   * The ride reads the difficulty live at every use (`difficultyTuning`), so
+   * there is nothing to rebuild and nothing to refresh — the next frame
+   * already plays by the new word. The repaint moves the "In use" tag.
+   */
+  private chooseDifficulty(level: Difficulty): void {
+    setDifficulty(level);
+    this.paint();
+  }
+
   private build(): void {
     const audio = this.opts.audio;
 
@@ -463,6 +481,15 @@ export class SettingsScreen {
       { label: "Medium", act: () => this.choose("medium") },
       { label: "Low", act: () => this.choose("low") },
     ];
+    // How forgiving the game is — one word each, like the quality rows, and a
+    // group of its own so it gets the same beat of air. See `skate/difficulty`
+    // for what each word moves (catch windows, balance rates); Normal is all
+    // ones, so every pinned number was measured on it.
+    const difficulties: Difficulty[] = ["chill", "normal", "gnarly"];
+    for (const level of difficulties) {
+      this.rows.push({ kind: "difficulty", level });
+      list.push({ label: DifficultyLabel[level], act: () => this.chooseDifficulty(level) });
+    }
     if (audio) {
       this.rows.push({ kind: "volume", channel: "music" }, { kind: "volume", channel: "sfx" });
       // The label is built below rather than passed in: these two rows are a
@@ -581,6 +608,8 @@ export class SettingsScreen {
         // the footnote about it.
         this.mark(button, "set-state", row.setting === current ? "In use" : "", "set-note");
         this.mark(button, "set-note", this.rungNote(row.setting, current), "");
+      } else if (row.kind === "difficulty") {
+        this.mark(button, "set-state", row.level === getDifficulty() ? "In use" : "", "");
       } else if (row.kind === "volume") {
         const level = this.level(row.channel);
         const lit = Math.round(level * TICKS);

@@ -24,14 +24,249 @@ Key art: `cms2hv48901lw22lppfy2tr8c` (street, golden hour, UI-free).
   by:** R, instant reset, same block
 
 ## Build plan & status
-Now: **17. GAMEPAD (2026-10-13)** — working mode: **whole coordinated
-build** (plan: `.opencode/plans/1790385689482-crisp-harbor.md`; this insert
-is M17, the plan's old M17–M21 are now M18–M22). The player wants to play
-with a controller on the computer (XMapper in mind). Native pad support
-lands, so no mapper is needed — and XMapper pad→keys keeps working untouched,
-since it arrives as key events and never meets the new code. Milestone 16's
-table is kept below; milestone 12's rows still marked ⏳/❌/⚠️ have NOT been
-absorbed here and are still owed.
+Now: **21. ALL PLANS (2026-10-13)** — working mode: **whole coordinated
+build** (plan: `.opencode/plans/1790385689482-crisp-harbor.md`). The player
+asked to build every open plan into the repo. That means: plan-file M19
+leftovers, M20-spillway decision, M21 audit, M22 difficulty, M12 attemptables
+(ramp-10, texture-13, shadow-12), M13 measurables, M18/M20 opens (park rails,
+NPC replant, pad/touch gaps), and the M23 preview attempt. Constraints stand:
+PDF-only pad, touch area budget, AO prepass declined on the three.js defect,
+no debug flags. Milestone 20's table is kept below; milestone 12's rows still
+marked ⏳/❌/⚠️ have NOT been absorbed here and are still owed.
+
+### Milestone 21 — ALL PLANS (2026-10-13) — landed, with stated exceptions
+
+Per-item close-out (plan file annotated to match where it was stale):
+
+- **Plan M19 leftovers:** consumed — flip flavours, square entries, manual
+holds and the bank all live in M20's trick system; the plan's ×10 clause
+is struck (×5 pins, asserted in integration-check).
+- **Plan M20-spillway decision:** spillway STAYS parked (standing player
+instruction); the three zip parks are the spot growth. No retail map data.
+- **M21 audit (no code):** per-map music tracks, roll beds, rider roster and
+push motion all pre-exist and are wired (parks ride the street bed).
+Off-board mode was never a system — out of scope unless asked.
+- **M22 difficulty: BUILT.** New `skate/difficulty.ts` (Chill/Normal/Gnarly,
+per-device persisted, Normal is all-ones so every pinned number stands);
+Grinder catch windows + min-speed and grind/manual balance read it live —
+settings takes effect next frame, no reboot. Settings screen gains three
+word rows with the existing "In use" tag pattern.
+- **M12 row 10 ✅** (was stale ⏳): round-8 shape verified live in-tree —
+flat 3.40 deck, back-face 3/3, decal-gap 90/90, `pushBlocked` present.
+- **M12 row 13 ✅** (was stale ⏳): `capRigTextures` caps pre-upload in
+`npc.ts`, tier-gated phone-only by construction; byte census needs a GPU.
+- **M12 row 12, conservative form BUILT:** skip the shadow re-raster when the
+texel-snapped grid didn't move (`trackShadow` returns moved; `look`
+cadences desktop at moved-or-every-3rd, phones untouched, realloc forces
+via `refreshShadow`). The spec's split-maps + dual-PCF combine is
+explicitly NOT this — it ends with the player's eye on a capture no
+sandbox here can take, so it stays queued. Row 11 stays declined (three.js
+depth-texture defect, unchanged).
+- **M13:** gpu-audit gate was already fixed in-tree (loader
+attached→detached + speed assertion — the "0.00 MB silent census" trap is
+gone); promote-on-smooth BUILT as a one-shot 30→60 bet after 90 clean
+seconds, revoked by any step-down (no wall-clock harness possible — headed
+straight to review + tsc; the frame-cap pacing destroys the headroom
+signal, so "clean stretch" is the honest trigger, stated in the code);
+InstancedMesh shadow-LOD was already in-tree (no phone prop shadows);
+**live phone-low census taken: 90.42 MB total, peak == steady**, no 85 MB
+character texture in the top rows, sky 8 + 6 MB. (DPR emulation failed in
+headless shell — framebuffer rows understate vs a real iPhone; noted, not
+hidden.)
+- **M18/M20 opens:** park grind lines DERIVED (sawmill 14 level lines;
+THPS rips arrive one-mesh-per-material so none qualify — pinned exact-zero
+rather than invented); NPC replants post-dress when the spawn moved (no run
+cancel); pad treflip/grind/commit/revert stay keyboard-only (PDF
+constraint); touch gains no buttons (area budget reaffirmed, codes added
+to the union type only); faces over 4 m don't block (documented limit).
+- **M23 preview: NOT pushed.** Pushing would deploy to genex.games drafts
+after the player had Genex removed for the redirect — needs an explicit
+ask, plus auth that isn't in this environment.
+- **Stuck, stated plainly:** the high-tier desktop census + gameplay
+screenshots are blocked by sandbox CDN flakiness (loader never detaches
+twice running; the low-tier run got through once). Not retried a third
+time — same wall. The title screen WAS captured rendering (shop, rider,
+four-entry menu incl. parks picker).
+
+Verified: `tsc` 0 · `vite build` clean · input-matrix 66/67 (1 pre-existing)
+· park-spawn + park-walls 10/10 + shadow-cadence 4/4, all watched failing ·
+integration 69/75, same six documented reds · grind-auto 8/8 · anim 24/29
+and turn 26/30 byte-identical to pristine (stale July baselines + sandbox
+CDN, not this work). gpu-audit gained a `CHROME_BIN` override (macOS path
+was hardcoded — binary swap only, flags/viewport/DPR untouched).
+
+### Milestone 20 — THPS × SKATE MASH-UP (2026-10-13) — landed
+
+(The player's pasted spec: arcade keys, charged ollie, tre flip, named
+grabs, grind/revert keys, brake key, mesh collision with wall faces, THPS
+scoring, state readout.)
+
+**Controls.** J/L/I/K throw kickflip/heelflip/treflip/shove-it off the same
+edge latches F/G/C always used (aliases kept working); U/O/Y/H/N hold a grab
+AND name it (Indy/Melon/Method/Nosegrab/new Tailgrab — X still grabs off the
+stick); M manuals, Shift+M (or Q) nose-manual, Shift alone unchanged; G held
+commits to rails (catch minimum 1.8 → 1.0 m/s, nothing else moves); V reverts
+inside 1.0 s of a clean touchdown at speed; B brakes like S (powerslide is
+the existing brake+steer pivot). F/G/C keep working unlisted — except the
+menu screen, which is spec-pure (a "G Heelflip" row would be a lie now that G
+grinds).
+
+**Charged ollie.** Wind-up length scales the pop: deadband 0.12 s (a tap is
+byte-for-byte the pinned 1.5872 m apex at 30/60/144), full +30% at 0.7 s.
+The clock starts on a fresh crouch and is read before the pop spends it.
+
+**Tre flip.** New trick id (400 pts): 360 shove-it + kickflip on one `flip`
+clock (`flipAxis: "both"`, rig spins roll and yaw together, landing test
+unchanged). Reuses the kickflip body clip — flips are ollies from the waist
+up; the board does the extra work.
+
+**Collision.** Park `blocked()` is real now: any face 0.3–4 m above the
+wheels blocks (ledge sides, funbox walls, ramp ends); kerbs/stairs pass,
+ridden faces pass (top ≈ wheels), decks/roofs above 4 m and down-facing
+ceilings are ridden under. Tangential motion survives contact by the existing
+wall-slide, so transition lips scrub instead of stopping. Faces over 4 m
+don't block (documented limit — nothing shipped needs it).
+
+**Scoring.** Multiplier cap 10 → 5 (THPS cap; integration-check text updated
+to match). Manual/grind tick scoring is the existing hold-time accrual (paid
+per second at the bank, shown live as the running pot + "…"). Trick names
+flash on landing via a 260 ms Web-Animations pulse on the fresh link.
+State pill under the combo: ROLLING / LOADING / AIR / MANUAL / GRIND / BAIL,
+written only on change.
+
+**Deviations from the pasted spec, all deliberate:** A stays steering (the
+spec's "Space/A pop" would put the pop on steer-left); Shift stays manual
+(Space-hold is the wind-up on every device); nollie has no key (no nose-pop
+in the physics); arrows stay move keys (they already steer); feel constants
+untouched (accel/friction/top speed already tuned; crouch, board spin and
+air control already exist and were verified, not rebuilt); touch gains no
+buttons (area budget — flick pad covers kick/heel/shove/ollie); pad gains
+nothing (its spec line — move, flicks, A/B/LT — was already wired).
+
+| # | change | file |
+| - | ------ | ---- |
+| 1 | J/L/I/K/V/B/M/G/U/O/Y/H/N keys, latches, holds, grabKey, HANDLED | `skate/input.ts` |
+| 2 | treflip + revert ids, Tailgrab, GRAB_KEYS, ×5 cap, resolve/held | `skate/tricks.ts`, `contracts.ts` |
+| 3 | chargeT boost, flipAxis both, grindWanted, landAge revert gate | `skate-model.ts`, `grind.ts`, `skater-rig.ts`, `skater-anim.ts` |
+| 4 | park steep-face `blocked()` | `world/parks.ts` |
+| 5 | state pill, trick flash, rail rows, ×5 comment | `ui/hud.ts`, `main.ts` |
+| 6 | spec-pure CONTROLS rows | `ui/menu.ts`, `README.md` |
+| 7 | item 11 (23 checks) + park-walls-check (10) + ×5 text | `tools/` |
+
+Verified: `tsc` 0 · `vite build` clean · input-matrix 64/65 (1 pre-existing
+rail red), 65/65 watched failing · park-walls 10/10 watched failing ·
+integration 69/75, the same six documented reds (matched name-for-name
+against M9) · grind-auto 8/8 · hold-check clean · anim-check 24/29 and
+turn-check 26/30 both A/B'd byte-identical on the pristine tree (stale July
+baselines + sandbox CDN clip failures, not this milestone). Two live
+mutations caught real gaps mid-build: the charge clock zeroed on the release
+frame before `pop()` read it, and the grab-flavour test bypassed the key map
+it claimed to prove — both fixed, both now assert the true path.
+
+### Milestone 19 — PARK SPAWN (2026-10-13) — landed
+
+**Cause 1 — the spawn was the bbox middle.** Sawmill has a roof, the
+warehouse IS a building, the haunted house has roofs — the middle of the
+bounding box on all three is under cover. Geometry bounds confirm it
+(sawmill y −23…+19, warehouse span 2884, haunted span 3047 — all normalised
+to ~70 m with min-Y on the slab, so the middle is inside/under structure).
+
+**Cause 2 — seating happened before the level arrived.** `goToSpot` calls
+`skate.reset()` synchronously, when the park surface only knows the empty
+slab; the GLB (and any real spawn) streams in later via `dress`, which never
+seated anyone.
+
+**Fix.** New `world/park-spawn.ts` (`pickParkSpawn`, zero deps beyond three
+so the harness drives it headless): coarse-to-fine grid over the normalised
+footprint scores ground-lowest, flat-within-0.6 m, and 8 m of open sky above
+the chest; the winner faces the middle; fully roofed degrades to lowest
+flat floor, empty input to origin. `dressPark` picks it once the meshes land
+instead of `(0,0,0)`. `goToSpot` re-seats (`ragdoll?.release()` +
+`skate.reset()`) when `dress` resolves — but ONLY if the player hasn't
+ridden off (within 3 m of the slab seat, speed < 0.5), so a slow stream-in
+never yanks a moving player; street/spillway spawns are analytic, so there
+it is a silent no-op to the same spot.
+
+Verified: new `tools/park-spawn-check.mjs` 7/7 (outside roof footprint,
+clear of block, 8 m sky by independent ray, stands on floor, faces park,
+empty-input fallback, fully-roofed fallback) · `tsc` 0 · `vite build` clean
+· input-matrix still 42/43 with the same single pre-existing rail red.
+Judgment call recorded: the picker guarantees open sky above, not distance
+from edges — a spawn 0.75 m past a roof edge with clear headroom passes, and
+the check asserts the footprint (±15), not a comfort margin.
+
+Still open, not this milestone: park grind lines and walls (M18 v1 limits
+stand), NPC replants from the slab-era spawn until the next run.
+
+**Follow-up (same day): middle means ON TOP of the middle.** The player
+reported warehouse + haunted still spawn below the map, and instructed: drop
+him in the middle. Evidence from parsing the real GLBs headlessly: the
+middle-column tops are broad decks (warehouse ≈ 13.9 flat across ±12 m,
+haunted ≈ 15.3–17.9 over a 4×4 m+ central mass, sawmill ≈ 0.2) — while the
+seating rule (`cast()`: first hit ≤ yHint+2) dives under them to the slab.
+The open-sky picker from the first half of this milestone was therefore
+answering the wrong question for these files (it also always returned the
+middle anyway: lowest ground nearest centre passes its 8 m headroom whenever
+the roof is higher than that).
+`park-spawn.ts` gains `columnTop` (topmost up-facing face, slab excluded) and
+`pickMiddleTop` (centre + 2 m ring max, null over void → `pickParkSpawn`
+fallback stays live). `dressPark` seats the middle top; `ParkSurface` grows a
+1.5 m spawn pedestal in `cast()` so the yHint-0 seating query (and slope taps
+and the NPC replant) land the deck instead of diving under it — tight radius,
+deck-level and below only, so riders keep the normal rule everywhere else.
+`tools/park-spawn-check.mjs` gains real-geometry pins (textures stripped
+in-memory, dressPark normalisation mirrored): 0.17 / 13.87 / 17.9 ± 2 — a
+changed zip fails LOUDLY instead of mis-seating. The 17.9 (not dead-centre
+15.3) was verified by grid scan to be deck, not a spike, and is pinned with
+that note. Verified: spawn check 10/10 · `tsc` 0 · `vite build` clean ·
+input-matrix unchanged at 42/43.
+
+### Milestone 18 — ZIP PARKS + PDF CONTROLS (2026-10-13) — landed
+
+**PARKS.** `public/parks/Skateparks/` holds the three files as shipped
+(saw_mill 1.3 MB/5.9k tri, warehouse 0.9 MB/2.6k tri, haunted 1.7 MB/9.4k
+tri). New `world/parks.ts` registers Saw Mill Park, Warehouse and Haunted
+House beside the street block, so the menu's spot picker lists four. Each
+park builds a slab + sun/hemi/fog synchronously (rideable on frame one),
+then streams its GLB in `dress`: normalised to ~70 m XZ with min-Y on the
+slab (the warehouse/haunted files are centimetre-scale, ~3000 units), street
+sky through the rung ladder. The ride asks a raycast `SurfaceProvider` —
+ramps, bowls and decks ride with no analytic description. V1 limits, stated
+not silent: `rails()` is empty (the rips name nothing, so no honest grind
+lines — flat bars ride across as geometry but never lock), `blocked()` is
+false with `softEdge` 55 steering him back, audio rides the street bed.
+
+**CONTROLS — the PDF's Flick-it layout, and only it.** The old pad map
+(A=ollie, B=shove, X/Y=kick/heel, stick-Y push) contradicted the PDF and is
+gone: A pushes, B brakes, X steps off (reset stand-in, no off-board mode),
+Y nollies (ollie stand-in), LB slides, RB manuals, LT/RT grab, right stick
+is the board (down crouches, up pops, up-left kicks, up-right heels,
+down-diagonals shove, down-then-diagonal spends the crouch into the flip),
+R3 bails (reset stand-in), d-pad and left-Y drive nothing (not in the PDF),
+slow-mo/object-manip have no verb. Touch FLICK flipped to the same sides
+(left kicks — was right). Keyboard unchanged as the dev/test aliases, header
+documents both tables. Controls screen lists the pad rows. Open, not silent:
+nose manual has no pad path; R3/X bail is reset (no forced-bail verb).
+
+| # | change | file |
+| - | ------ | ---- |
+| 1 | 3 GLBs vendored + 3 park maps (raycast surface, normalise, street sky) | `public/parks/`, `world/parks.ts`, `world/maps.ts`, `main.ts` (audio→street) |
+| 2 | feeder rewritten to the PDF map (HOLD_CODES, RS state machine, silent first-sighting + LT/RT sibling rule) | `controllers/gamepad/skate-gamepad.ts` |
+| 3 | touch flick sides flipped to PDF (left=kick) | `controllers/touch/skate-touch-layer.ts` |
+| 4 | item 10 rewritten: 21 PDF checks at 30/60/144 (Y-drives-nothing, A/B/Y/LB/RB/LT/RT, X reset, crouch, 7 flick sectors, down-then-flick, Start, unplug) | `tools/input-matrix.mjs` |
+| 5 | pad rows on the Controls screen | `ui/menu.ts` |
+
+Verified: `tsc` 0 · `vite build` clean (GLBs in `dist/parks/`) · item 10,
+21/21 at all rates, every proof watched failing (three seeded mutations
+caught by exactly their checks; one bad mutation of mine crashed instead and
+was redone properly) · parks build headless (slab height 0, spawn centred,
+fog on) · registry lists street,sawmill,warehouse,haunted. Full file 42/43;
+the one red (`slide key: the bar he declined is still steel`,
+handrail-3@8m/s 30fps by 0.11 m) A/B'd byte-identical on the pristine tree
+— pre-existing, not this milestone's. Caught live while building: the shared
+KeyX first-sighting release (LT/RT), the intra-crouch throw being spent by a
+down-sector no-op, and `buildPaint`/`createMaterials` needing `document` —
+all fixed, stubs carry the shape.
 
 ### Milestone 17 — GAMEPAD (2026-10-13) — landed
 

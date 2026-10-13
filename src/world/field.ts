@@ -482,11 +482,16 @@ export interface Field {
    * edge in the level against a different grid and every one of them crawls —
    * which is exactly what a player sees as sparkle along a kerb.
    *
+   * Returns whether the snapped grid MOVED — the row-12 cadence cache in
+   * `look.ts` skips the re-raster when it did not. Same rounding the draw-time
+   * snap applies, so "not moved" means the map would rasterise bit-identical
+   * pixels (same grid, same casters, same resolution).
+   *
    * Optional on the interface because `Field` is the contract BOTH maps return
    * and the spillway keeps its own (much wider) rig; a map that does not
    * implement this simply keeps a light that never moves.
    */
-  trackShadow?(focus: THREE.Vector3): void;
+  trackShadow?(focus: THREE.Vector3): boolean;
   /**
    * Swing the key light, in degrees. The whole rig follows: the shadow box's
    * own basis, the cloud deck's lit face and the panorama's rotation are all
@@ -519,6 +524,21 @@ export interface Field {
    * table would have built. See `shadowMapSizeFor`.
    */
   shadowMapSize?: number;
+}
+
+/**
+ * The shadow grid cell a focus point falls in — the draw-time snap's own
+ * rounding, factored out so the row-12 cadence (`trackShadow`'s return) and
+ * the headless `tools/shadow-cadence-check.mjs` ask the same question. Same
+ * cell ⇒ same sub-texel alignment ⇒ an identical raster.
+ */
+export function snapGridKey(
+  fx: number,
+  fy: number,
+  texelX: number,
+  texelY: number,
+): readonly [number, number] {
+  return [Math.round(fx / texelX), Math.round(fy / texelY)];
 }
 
 export function createField(scene: THREE.Scene, tier: QualityTier): Field {
@@ -962,10 +982,25 @@ export function createField(scene: THREE.Scene, tier: QualityTier): Field {
   }
 
   /** The follow. See `Field.trackShadow`. */
-  const trackShadow = (focus: THREE.Vector3): void => {
+  let shadowCell: readonly [number, number] | null = null;
+  const trackShadow = (focus: THREE.Vector3): boolean => {
     sun.target.position.copy(focus);
     sun.position.copy(focus).addScaledVector(SUN_DIR, SUN_DISTANCE);
     sun.target.updateMatrixWorld();
+    // Grid-change detection with the draw-time snap's own rounding (see the
+    // block above): same cell ⇒ the map would rasterise identical pixels.
+    // Re-derived per call — the governor halves `mapSize` live, and the grid
+    // it implies halves with it.
+    const side = Math.max(1, sun.shadow.mapSize.x);
+    const cell = snapGridKey(
+      focus.dot(SUN_RIGHT),
+      focus.dot(SUN_UP),
+      (BOX.halfX * 2) / side,
+      (BOX.up + BOX.down) / side,
+    );
+    const moved = shadowCell === null || cell[0] !== shadowCell[0] || cell[1] !== shadowCell[1];
+    shadowCell = cell;
+    return moved;
   };
 
   /** TEMPORARY — the tuning panel's sun swing. See `Field.setSunAngles`. */

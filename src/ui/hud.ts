@@ -528,8 +528,8 @@ ${KEYCAP_CSS}
 }
 #combo .chain.w3 { font-size: clamp(13px, 2vw, 26px); }
 #combo .chain.w4 { font-size: clamp(12px, 1.7vw, 22px); }
-/* A line does not stop at four. The multiplier caps at ten and a player who
-   knows that will chase ten, so the type has to keep making room: fourteen
+/* A line does not stop at four. The multiplier caps at five and a player who
+   knows that will chase five, so the type has to keep making room: fourteen
    callouts is roughly 170 characters, and in Syne Mono that is five lines at
    w4. Two more steps down and the same line is three lines tall and still
    legible over the skater's shoulder. */
@@ -617,6 +617,18 @@ ${KEYCAP_CSS}
   margin: .3em 0 0;
 }
 #streak.show { opacity: .85; }
+/* THE STATE — ROLLING / LOADING / AIR / MANUAL / GRIND / BAIL, one word under
+   the combo in the same instrument face as the streak. It is the mash-up's
+   state indicator: the word a new player reads to learn what he is in the
+   middle of. Same size and fade as the streak, always on (unlike the streak,
+   which only shows past one clean landing). */
+#ride-state {
+  font-family: "Syne Mono", "Big Shoulders Display", Impact, monospace;
+  font-weight: 400;
+  font-size: clamp(11px, 1.2vw, 14px); letter-spacing: .14em;
+  opacity: .85; text-shadow: 1px 2px 0 rgba(0,0,0,.85);
+  margin: .3em 0 0;
+}
 /* The results card is the readout for as long as it is up, and the live one
    would print straight through the board underneath it — the run can end with
    a line still on screen, and the two of them land in the same place. The
@@ -1002,15 +1014,13 @@ const BANK_GRACE = 0.12;
  *     deleted on 2026-07-29 — looking around is plain mouse movement, and the
  *     view eases back behind him on its own after a moment of stillness. So
  *     there is no recentre row: nothing recentres it, it recentres itself.
- *   · THERE IS NO GRIND ROW, because grinding has no key: it starts when he
- *     rides onto the line, on the player's own instruction. A key legend that
- *     lists a skill with no key is the same lie as one that lists a key with no
- *     skill, so the row names what E still buys — the deck laid SIDEWAYS across
- *     a line, the one entry riding onto it cannot ask for (see
- *     `SkateModel.tryCatchGrind` and `tools/grind-auto.mjs`). MANUAL keeps
- *     Shift, from the second 2026-07-29 swap: both holds are multi-second
- *     arguments with A/D, and having ridden it the player wanted the pinky's
- *     home key under the manual.
+ *   · Grind HAS a row now (G held commits the rail), and so do revert (V),
+ *     brake (B) and the mash-up's flip/grab/manual keys. E still buys only
+ *     the deck laid SIDEWAYS across a line (see `SkateModel.tryCatchGrind`
+ *     and `tools/grind-auto.mjs`). MANUAL keeps Shift, from the second
+ *     2026-07-29 swap: both holds are multi-second arguments with A/D, and
+ *     having ridden it the player wanted the pinky's home key under the
+ *     manual — M manuals the same way now.
  *   · BALANCE names A/D a second time on purpose. They are the keys that fight
  *     the gauge, and the gauge used to come up with nothing on screen naming
  *     the thing that saves it.
@@ -1018,15 +1028,22 @@ const BANK_GRACE = 0.12;
 const CONTROL_ROWS: readonly (readonly [string, readonly string[], boolean])[] = [
   ["Ride", ["W", "A", "S", "D"], false],
   ["Ollie", ["Space"], true],
-  ["Flip", ["F", "G", "C"], false],
-  ["Grab", ["X"], true],
+  ["Flip", ["J", "L", "I", "K"], false],
+  ["Grab", ["X", "U", "O", "Y", "H", "N"], true],
+  ["Grind", ["G"], true],
+  ["Revert", ["V"], false],
   ["Slide across", ["E"], true],
-  ["Manual", ["Shift"], true],
+  ["Manual", ["Shift", "M"], true],
+  ["Nose", ["Q", "Shift+M"], true],
+  ["Brake", ["S", "B"], false],
   ["Balance", ["A", "D"], false],
   ["Look around", ["Mouse"], false],
   ["Reset", ["R"], false],
   ["Pause", ["Esc"], false],
 ];
+
+/** What he is doing, in one word — the mash-up's state readout. */
+export type RideState = "ROLLING" | "LOADING" | "AIR" | "MANUAL" | "GRIND" | "BAIL";
 
 /**
  * Held tricks that are announced but NOT badged — see `setHeld`.
@@ -1152,6 +1169,9 @@ export class Hud {
   private fakieNow = false;
   /** What the stance badge is currently saying, so it is not rewritten daily. */
   private badge = "";
+  private rideStateEl: HTMLDivElement;
+  /** What the state pill is currently saying — same no-rewrite rule as above. */
+  private rideStateShown: RideState | "" = "";
   /** Is the results card up? Its hooks fire on the EDGES, not on every call. */
   private resultsUp = false;
   /** GO AGAIN / FREE RIDE, while it is. */
@@ -1202,6 +1222,7 @@ export class Hud {
           <div class="chain"></div>
           <div class="tally"></div>
           <div id="streak"></div>
+          <div id="ride-state"></div>
         </div>
       </div>
       <div id="held"></div>
@@ -1220,6 +1241,7 @@ export class Hud {
     this.chain = this.root.querySelector("#combo .chain") as HTMLDivElement;
     this.tally = this.root.querySelector("#combo .tally") as HTMLDivElement;
     this.streakEl = this.root.querySelector("#streak") as HTMLDivElement;
+    this.rideStateEl = this.root.querySelector("#ride-state") as HTMLDivElement;
     this.totalEl = this.root.querySelector("#score .n") as HTMLSpanElement;
     this.speedNum = this.root.querySelector("#speedo .n") as HTMLSpanElement;
     this.stanceEl = this.root.querySelector("#speed .sw") as HTMLSpanElement;
@@ -1327,6 +1349,26 @@ export class Hud {
       this.links.push({ text: word, scored: true });
     }
     this.paint("build");
+    this.flashLatest();
+  }
+
+  /**
+   * The trick name flashes as it lands — the mash-up's callout pop. The
+   * Web-Animations pulse runs on the freshly painted last link only; the next
+   * paint rebuilds the chain, so a rapid second trick gets its own flash
+   * rather than restarting this one's. Guarded: a headless harness has no
+   * `animate`, and a missing one must not take the readout with it.
+   */
+  private flashLatest(): void {
+    const el = this.chain.lastElementChild;
+    if (!el || typeof (el as HTMLElement).animate !== "function") return;
+    (el as HTMLElement).animate(
+      [
+        { transform: "scale(1.35)", opacity: 0.4 },
+        { transform: "scale(1)", opacity: 1 },
+      ],
+      { duration: 260, easing: "ease-out" },
+    );
   }
 
   /**
@@ -1344,6 +1386,7 @@ export class Hud {
     if (this.settleT > 0) this.startLine();
     this.links.push({ text: name.toUpperCase(), scored: false });
     this.paint("build");
+    this.flashLatest();
   }
 
   /**
@@ -1434,7 +1477,6 @@ export class Hud {
     this.streakEl.classList.remove("show");
     this.endLine();
   }
-
   /** Clean landings in a row — the run's own rhythm, separate from one line. */
   setStreak(n: number): void {
     if (n > 1) {
@@ -1443,6 +1485,18 @@ export class Hud {
     } else {
       this.streakEl.classList.remove("show");
     }
+  }
+
+  /**
+   * What he is doing, in one word. Called every frame from the loop; writes
+   * only on change, by the same rule as every other per-frame widget in this
+   * file. The mode itself is the caller's arithmetic (state + charging +
+   * manual), because the ride owns all three facts and this file owns none.
+   */
+  setRideState(mode: RideState): void {
+    if (mode === this.rideStateShown) return;
+    this.rideStateShown = mode;
+    this.rideStateEl.textContent = mode;
   }
 
   /**

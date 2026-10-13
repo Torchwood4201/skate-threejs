@@ -70,6 +70,8 @@ export class RunGame {
   private opts: RunGameOptions;
   private npc: RunNpc | null = null;
   private phaseWas: RunPhase = "free";
+  /** The mounted spot's surface — kept so `replant()` can re-seat the NPC. */
+  private surface: SurfaceProvider | null = null;
   /** Counts up with every run so a board read that comes back late for a run
    *  the player has already replaced can tell, and drop itself. */
   private runId = 0;
@@ -108,8 +110,27 @@ export class RunGame {
    * map that no longer exists.
    */
   setWorld(surface: SurfaceProvider): void {
+    this.surface = surface;
     this.run.cancel();
     this.npc?.dispose();
+    this.npc = mountRunNpc(this.scene, surface, {
+      onApproach: () => this.startRun(),
+      speak: this.opts.speak,
+      loader: this.opts.loader,
+    });
+  }
+
+  /**
+   * The spawn moved under him — a streamed park only learns its real spawn
+   * once the geometry lands, after `setWorld` already planted him from the
+   * slab-era one. Re-mounts the NPC only: no run is cancelled, because unlike
+   * a map switch nothing about the world the minute is on has changed. Called
+   * from the dress-completion path when the spawn actually moved.
+   */
+  replant(): void {
+    if (!this.npc || !this.surface) return;
+    const surface = this.surface;
+    this.npc.dispose();
     this.npc = mountRunNpc(this.scene, surface, {
       onApproach: () => this.startRun(),
       speak: this.opts.speak,

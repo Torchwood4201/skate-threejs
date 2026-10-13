@@ -505,6 +505,17 @@ const BOARD_STYLE = BOARD_CSS;
 //     player acts on: the chain multiplies by how many DIFFERENT tricks are in
 //     it. The readout teaches it — the chain simply stops growing — but the
 //     player deserves to be told once rather than to find out at the bank.
+// …and this round (the mash-up spec) —
+//   · the flip row is J/L/I/K with I dealing the new Tre Flip, and F/G/C are
+//     unlisted aliases that still work (G had to move: it is the grind key
+//     now, so a "G Heelflip" row would be the lie this header exists to kill).
+//   · the grab row names five keys and five grabs (Tailgrab is new); X still
+//     grabs off the stick and stays working, unlisted.
+//   · M manuals, Shift+M (and Q) nose-manual; G commits to rails; V reverts;
+//     B brakes alongside S; Space charges — hold longer, pop bigger.
+//   · the manual's 4 s clock is not on the screen: with the balance gauge live
+//     the ending is ridden, not timed, and a row promising four seconds would
+//     be wrong every time A/D buy more.
 //
 // The manuals carry their own speed gate too: the book will not start one below
 // `MANUAL_MIN_SPEED`, so "rolling" is part of the binding and not flavour. The
@@ -517,7 +528,7 @@ const BOARD_STYLE = BOARD_CSS;
 const CONTROLS: [string, string][] = [
   ["V  W", "Push"],
   ["A  D", "Carve · spin in the air"],
-  ["S", "Brake · with A/D it scrubs a pivot, at any speed"],
+  ["S  B", "Brake · with A/D it powerslides, at any speed"],
   // One row, not two, as of the camera lane's 2026-07-29 change: the right
   // button is out of it entirely — looking around is plain mouse movement under
   // the lock now, and the view eases itself back behind him after 1.2 s of
@@ -525,19 +536,22 @@ const CONTROLS: [string, string][] = [
   // button that does nothing and a click that hands back a camera which now
   // hands itself back, which is the same lie the pivot row told twice.
   ["MOUSE", "Look around · it eases back behind you as you ride on"],
-  ["HOLD SPACE", "Load up, release to ollie"],
+  ["HOLD SPACE", "Load up — hold LONGER for bigger air · release to ollie"],
   ["…ON ANY SLOPE", "Keep it held to pump for speed"],
-  ["F", "Kickflip"],
-  ["G", "Heelflip"],
-  ["C", SHOVEIT_CALLOUT],
+  ["J", "Kickflip"],
+  ["L", "Heelflip"],
+  ["I", "Tre Flip"],
+  ["K", SHOVEIT_CALLOUT],
   ["…IN THE AIR", "Flick one mid-ollie · land it square"],
-  // The four grabs ride on ONE line rather than a continuation row: on a wide
+  // The five grabs ride on ONE line rather than a continuation row: on a wide
   // screen the list flows two pairs to a row, and a "…+ A D S" of its own
   // landed under whatever happened to be left of it instead of under X.
-  ["X", "Grab, airborne — A D S name it · let go to land"],
-  ["SHIFT", "Manual — hold while rolling"],
-  ["Q", "Nose manual — the same, up front"],
-  ["…A MANUAL", "Carries your line across the flat · 4 s"],
+  ["U O Y H N", "Grab, airborne — Indy · Melon · Method · Nose · Tail"],
+  ["M", "Manual — hold while rolling · carries your line"],
+  ["SHIFT + M", "Nose manual — the same, up front (Q too)"],
+  ["SHIFT", "Manual too — the pinky's home key stays put"],
+  ["HOLD G", "Commit to the rail — lines take you at a crawl"],
+  ["V", "Revert — just landed? keep the line rolling"],
   // …AND THE GRIND IS A SITUATION AGAIN, on the player's own instruction:
   // *"let's make rail sliding activate when I simply ride onto it, without
   // holding a button. As soon as you ride onto it, the rail slide starts."* This
@@ -559,6 +573,20 @@ const CONTROLS: [string, string][] = [
   ["R", "Reset"],
   ["ESC", "Pause"],
   ["ARROW KEYS", "Push, carve and brake too"],
+  // …AND THE PAD, on the PDF's Flick-it layout and nothing else. The right
+  // stick is the board (down crouches, up pops, diagonals flip), the left
+  // stick steers, A pushes and B brakes — the full table lives in
+  // `controllers/gamepad/skate-gamepad.ts`, this is the card version.
+  ["PAD · LEFT STICK", "Steer / carve · aims grabs with the triggers"],
+  ["PAD · A / B", "Push / brake — B with steer powerslides"],
+  ["PAD · RIGHT ↓ HOLD", "Crouch — let go to ollie · longer holds it"],
+  ["PAD · RIGHT ↑", "Ollie · up-left kickflip · up-right heelflip"],
+  ["PAD · RIGHT ↓↺", "Down-diagonals shove-it · down-then-flick spends it"],
+  ["PAD · LT / RT", "Grab — left stick tweaks it · let go to land"],
+  ["PAD · LB / RB", "Deck sideways across a rail / manual"],
+  ["PAD · X / R3", "Step off / bail — back at the spawn"],
+  ["PAD · Y", "Nollie"],
+  ["PAD · START", "Pause"],
 ];
 
 export class Menu {

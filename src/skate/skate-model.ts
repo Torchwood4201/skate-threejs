@@ -43,8 +43,9 @@ import {
 import type { GrindQuery } from "./grind";
 import { Grinder } from "./grind";
 import { meetSteel, steelBars } from "./rail-steel";
-import type { TrickContext } from "./tricks";
+import type { GrabFlavour, TrickContext } from "./tricks";
 import { TrickBook } from "./tricks";
+import { difficultyTuning } from "./difficulty";
 
 export type { TrickName } from "./contracts";
 
@@ -70,6 +71,18 @@ const CARVE_SCRUB = 0.2; // speed bled by a hard turn
 const GRAVITY = 17;
 const OLLIE_POP = 7.3; // ~1.6 m of air, ~0.86 s hang
 const KICKFLIP_POP = 7.6; // ~1.7 m, ~0.89 s — the flip needs the extra beat
+/**
+ * The charged ollie, in two numbers. Under the deadband the pop is exactly
+ * the impulse above — a tap is byte-for-byte the ollie every pinned apex was
+ * measured on. Past it the legs buy up to +30%, full at `CHARGE_FULL`, which
+ * is the mash-up's "hold longer for bigger air" without moving the floor.
+ */
+const CHARGE_DEADBAND = 0.12;
+const CHARGE_FULL = 0.7;
+/** V only buys anything this soon after a clean touchdown, seconds. */
+const REVERT_WINDOW = 1.0;
+/** …and only with this much roll still in the wheels, m/s. */
+const REVERT_MIN_SPEED = 2;
 const FLIP_TIME = 0.4; // seconds for the board to come all the way round
 const LANDING_SCRUB = 0.9; // speed lost on a clean landing
 const MAX_LEAN = 0.5; // radians the skater banks into a full carve
@@ -594,10 +607,16 @@ export interface SkateInput {
   // clock without the ride waiting on it; an absent flag reads as not pressed.
   /** G. */
   heelflipPressed?: boolean;
-  /** C. */
+  /** C or K. */
   shoveitPressed?: boolean;
-  /** X, held, airborne only. */
+  /** I: a 360 shove-it with a kickflip in it — roll AND yaw together. */
+  treflipPressed?: boolean;
+  /** V, edge: banked only inside the landing window — see `SkateModel`. */
+  revertPressed?: boolean;
+  /** X/U/O/Y/H/N, held, airborne only. */
   grabHeld?: boolean;
+  /** U/O/Y/H/N names it outright — beats the stick. Null with X alone. */
+  grabKey?: GrabFlavour | null;
   /** Shift, held. */
   manualHeld?: boolean;
   /** Q, held. */
@@ -634,6 +653,14 @@ export interface SkateInput {
    * you out and the end of the rail runs you off it.
    */
   slideHeld?: boolean;
+  /**
+   * G, held — **GRIND COMMIT, and only that.** Rails take him at a crawl
+   * while it is down (`MIN_CATCH_SPEED` relaxes in the Grinder); everything
+   * the catch refuses stays refused — square entries still need E, a rising
+   * board is still scenery, a deck still coming round still puts him down.
+   * Releasing it mid-grind changes nothing: the key is about getting ON.
+   */
+  grindHeld?: boolean;
 }
 
 export interface SkateEvents {
@@ -709,10 +736,14 @@ export const EMPTY_INPUT: SkateInput = {
   kickflipPressed: false,
   heelflipPressed: false,
   shoveitPressed: false,
+  treflipPressed: false,
+  revertPressed: false,
   grabHeld: false,
+  grabKey: null,
   manualHeld: false,
   noseManualHeld: false,
   slideHeld: false,
+  grindHeld: false,
 };
 
 /**
@@ -801,8 +832,12 @@ export class SkateModel {
   boardPitch = 0;
   /** 0 → 1 as the board comes round on a flip; 1 means caught. */
   flip = 1;
-  /** Which way the board is coming round: a flip rolls, a shove-it yaws. */
-  flipAxis: "roll" | "yaw" = "roll";
+  /**
+   * Which way the board is coming round: a flip rolls, a shove-it yaws, a
+   * tre flip does both at once. The rig spins `rotation.z` for roll and
+   * `rotation.y` for yaw, so "both" is literally both.
+   */
+  flipAxis: "roll" | "yaw" | "both" = "roll";
   /** …and which way round. Kickflip and heelflip are the same axis, opposite signs. */
   flipSign: 1 | -1 = -1;
 
@@ -821,6 +856,20 @@ export class SkateModel {
   bailT = 0;
   /** True while the jump key is down and he is crouched, loading the pop. */
   charging = false;
+  /**
+   * How long this wind-up has been held, seconds — the mash-up's charged
+   * ollie. `pop()` scales the impulse off it (nothing under 0.12 s, full at
+   * 0.7 s), so a tap is byte-for-byte the ollie every pinned number was
+   * measured on and only a real hold buys air. Zeroed the moment winding
+   * stops, wherever that happens.
+   */
+  private chargeT = 0;
+  /**
+   * Seconds since the last clean touchdown — the revert window. V only buys
+   * anything inside `REVERT_WINDOW` of a landing, at speed, with empty hands.
+   * Starts old (999) so nothing about boot reads as a landing.
+   */
+  private landAge = 999;
 
   /** Degrees turned since this air (or pivot) began — the landing reads it. */
   readonly spin: SpinTracker = createSpinTracker();
@@ -904,6 +953,11 @@ export class SkateModel {
   private onWall = false;
   /** The slide key, as of this frame's input — see `SkateInput.slideHeld`. */
   private slideWanted = false;
+  /**
+   * The grind key, as of this frame's input — G held. Rails take him slower
+   * while it is down; see `SkateInput.grindHeld` and `Grinder.catch`.
+   */
+  private grindWanted = false;
   /** True while the wheels are running against the way he is standing. */
   private rollingBackwards = false;
   /** The heading the last time they agreed — see `syncStance`. */
@@ -1039,6 +1093,8 @@ export class SkateModel {
     this.grind.reset();
     this.tricks.reset();
     this.spin.reset();
+    this.chargeT = 0;
+    this.landAge = 999;
     this.surfaceNormal.set(0, 1, 0);
     this.wallAlong = -1;
     this.wallOver = 0;
@@ -1052,6 +1108,7 @@ export class SkateModel {
     // the step — `tryCatchGrind` runs out of `roll()` and out of `flight()`,
     // neither of which is handed the frame's input. See `SkateInput.slideHeld`.
     this.slideWanted = input.slideHeld === true;
+    this.grindWanted = input.grindHeld === true;
     if (this.state === "ragdoll") {
       this.updateRagdoll(dt);
       this.settleWall(dt);
@@ -1253,6 +1310,9 @@ export class SkateModel {
     // Announced BEFORE the tricks below, so the frame he lets go the crouch is
     // already released when the pop asks for the trick clip.
     this.setCharging(grounded && input.chargeHeld);
+    // …and timed: the wind-up's own length is what the charged ollie scales
+    // off (`CHARGE_DEADBAND`/`CHARGE_FULL` in `pop()`).
+    if (this.charging) this.chargeT += dt;
 
     // --- the balance he is holding, if he is up on two wheels ----------------
     // Before the trick block, so the frame it runs out is the frame the book is
@@ -1298,6 +1358,25 @@ export class SkateModel {
       this.trickId = fired;
       this.trick = this.tricks.def(fired).name;
       this.setFlip(fired);
+    }
+
+    // --- revert ---------------------------------------------------------------
+    // V just after a clean touchdown, still rolling, hands empty: the line
+    // keeps rolling instead of banking. `state === "rolling"` is read AFTER
+    // the pop above, so a V pressed on the same frame as a pop pops — the
+    // revert loses the tie, exactly like every other grounded-vs-air race in
+    // this file. One bank, then the clock is spent so holding V does not
+    // machine-gun reverts down the plaza.
+    if (this.state === "rolling") this.landAge += dt;
+    if (
+      input.revertPressed &&
+      this.state === "rolling" &&
+      this.holding === null &&
+      this.landAge < REVERT_WINDOW &&
+      Math.abs(this.speed) > REVERT_MIN_SPEED
+    ) {
+      this.landAge = 999;
+      this.bankTrick("revert", 0, 0, this.stance);
     }
 
     // --- integrate ----------------------------------------------------------
@@ -2410,11 +2489,19 @@ export class SkateModel {
   }
 
   private pop(id: TrickId, grade: number): void {
+    // The charge: a tap (under 0.12 s of wind-up) pops exactly the impulse
+    // every pinned apex was measured on; holding the crouch buys up to +30%
+    // more legs, which is the mash-up's "hold longer for bigger air". Read
+    // BEFORE `setCharging(false)` zeroes the clock below.
+    const boost = 1 + 0.3 * THREE.MathUtils.clamp((this.chargeT - CHARGE_DEADBAND) / (CHARGE_FULL - CHARGE_DEADBAND), 0, 1);
+    this.chargeT = 0;
     this.setCharging(false);
     this.driveT = 0; // the foot left the ground; the shove goes with it
     // A shove-it is a flat spin of the board, so it pops like an ollie; the
-    // flips need the extra beat for the deck to come all the way round.
-    const impulse = id === "ollie" || id === "shoveit" ? OLLIE_POP : KICKFLIP_POP;
+    // flips need the extra beat for the deck to come all the way round — and
+    // a tre flip is a flip, whatever else it is doing sideways.
+    const base = id === "ollie" || id === "shoveit" ? OLLIE_POP : KICKFLIP_POP;
+    const impulse = base * boost;
     this.trickId = id;
     this.trick = this.tricks.def(id).name;
     this.setFlip(id);
@@ -2438,6 +2525,13 @@ export class SkateModel {
       this.flip = 0;
       this.flipAxis = "yaw";
       this.flipSign = 1;
+    } else if (id === "treflip") {
+      // A 360 shove-it with a kickflip inside it: the rig spins both axes off
+      // the one `flip` clock, and the landing's `flip >= 1` test needs no
+      // second opinion — one board, one catch.
+      this.flip = 0;
+      this.flipAxis = "both";
+      this.flipSign = -1;
     } else {
       this.flip = 1;
     }
@@ -2508,6 +2602,8 @@ export class SkateModel {
     const trick = this.trick;
     const trickId = this.trickId;
     this.state = "rolling";
+    this.landAge = 0; // the revert window opens here — see `REVERT_WINDOW`
+    this.chargeT = 0; // a wind-up cannot survive a landing; the next crouch re-zeroes anyway
     // Which way he rides away — and he rides away the way he was already GOING.
     //
     // One question, asked of the geometry and nothing else: is the nose still
@@ -2745,6 +2841,8 @@ export class SkateModel {
       speed: this.speed,
       stance: this.stance,
       grounded,
+      // G held: commit. See `GrindQuery.grindWanted`.
+      grindWanted: this.grindWanted,
     };
     const state = this.grind.catch(q, rails);
     if (!state) return false;
@@ -3026,7 +3124,10 @@ export class SkateModel {
     // so a manual held long is a manual held round a curve — the ground-level
     // version of the rail's `SQUARE_TAX`.
     this.manualBalVel +=
-      (MANUAL_TIP * this.manualBal + wander + steer * MANUAL_CORRECT_RATE) * dt;
+      (MANUAL_TIP * difficultyTuning().tip * this.manualBal +
+        wander +
+        steer * MANUAL_CORRECT_RATE * difficultyTuning().correct) *
+      dt;
     this.manualBalVel *= Math.exp(-MANUAL_BALANCE_DAMP * dt);
     this.manualBal = THREE.MathUtils.clamp(this.manualBal + this.manualBalVel * dt, -1, 1);
     // Past the edge either way and the wheels are coming down. The book turns
@@ -3144,6 +3245,11 @@ export class SkateModel {
 
   private setCharging(winding: boolean): void {
     if (winding === this.charging) return;
+    // A fresh crouch starts the clock at zero — and ONLY a fresh one. Zeroing
+    // on the way OUT would wipe the wind-up on the release frame before
+    // `pop()` reads it (measured: a 45-frame hold popped the tap height).
+    // The pop zeroes it after reading; `land()` backstops the rest.
+    if (winding) this.chargeT = 0;
     this.charging = winding;
     this.events.onCharge?.(winding);
   }
